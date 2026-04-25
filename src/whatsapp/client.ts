@@ -24,8 +24,9 @@ export function start(): Client {
     console.error('❌ Falha na autenticação — delete a pasta .wwebjs_auth e tente novamente');
   });
 
-  client.on('disconnected', (reason: string) => {
+  client.on('disconnected', async (reason: string) => {
     console.warn('⚠️ Desconectado:', reason);
+    try { await client.destroy(); } catch { /* browser may already be gone */ }
     setTimeout(() => client.initialize(), 5000);
   });
 
