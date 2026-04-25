@@ -2,7 +2,7 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { reply } from '../ai/glm';
 
-function createClient(): void {
+async function createClient(): Promise<void> {
   const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -24,9 +24,6 @@ function createClient(): void {
     console.error('❌ Falha na autenticação — delete a pasta .wwebjs_auth e tente novamente');
   });
 
-  // Destroy the current instance fully before spinning up a fresh one.
-  // Re-calling initialize() on the same instance leaves stale Puppeteer
-  // execution contexts that cause ProtocolError on reconnect.
   client.on('disconnected', async (reason: string) => {
     console.warn('⚠️ Desconectado:', reason);
     try { await client.destroy(); } catch { /* browser may already be gone */ }
@@ -48,9 +45,17 @@ function createClient(): void {
     await msg.reply(response);
   });
 
-  client.initialize();
+  // Wrap initialize() so a ProtocolError from a still-locked Chrome user data
+  // directory doesn't crash the process — destroy and retry with a fresh instance.
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error('⚠️ Erro na inicialização, tentando novamente em 10s:', err);
+    try { await client.destroy(); } catch { /* ignore */ }
+    setTimeout(createClient, 10000);
+  }
 }
 
 export function start(): void {
-  createClient();
+  createClient().catch(err => console.error('⚠️ Falha fatal ao iniciar cliente:', err));
 }
