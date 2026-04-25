@@ -28,7 +28,7 @@ Nunca invente informações — se não souber, pergunte.`;
 export async function chat(messages: Message[]): Promise<string> {
   const response = await axios.post(
     GLM_URL as string,
-    { model: 'glm-4-flash', messages, temperature: 0.3 },
+    { model: 'GLM-4.7', messages, temperature: 0.3 },
     { headers: { Authorization: `Bearer ${GLM_KEY}`, 'Content-Type': 'application/json' } }
   );
   return response.data.choices[0].message.content as string;
