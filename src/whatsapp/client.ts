@@ -2,7 +2,7 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { reply } from '../ai/glm';
 
-export function start(): Client {
+function createClient(): void {
   const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -24,10 +24,13 @@ export function start(): Client {
     console.error('❌ Falha na autenticação — delete a pasta .wwebjs_auth e tente novamente');
   });
 
+  // Destroy the current instance fully before spinning up a fresh one.
+  // Re-calling initialize() on the same instance leaves stale Puppeteer
+  // execution contexts that cause ProtocolError on reconnect.
   client.on('disconnected', async (reason: string) => {
     console.warn('⚠️ Desconectado:', reason);
     try { await client.destroy(); } catch { /* browser may already be gone */ }
-    setTimeout(() => client.initialize(), 5000);
+    setTimeout(createClient, 5000);
   });
 
   client.on('message', async (msg) => {
@@ -46,5 +49,8 @@ export function start(): Client {
   });
 
   client.initialize();
-  return client;
+}
+
+export function start(): void {
+  createClient();
 }
