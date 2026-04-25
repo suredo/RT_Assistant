@@ -11,9 +11,21 @@ async function createClient(): Promise<void> {
     }
   });
 
-  client.on('qr', (qr: string) => {
-    console.log('\n📱 Escaneie o QR Code abaixo com o número do assistente:\n');
-    qrcode.generate(qr, { small: true });
+  client.on('qr', async (qr: string) => {
+    const pairingNumber = process.env.PAIRING_NUMBER;
+    if (pairingNumber) {
+      try {
+        const code = await client.requestPairingCode(pairingNumber);
+        console.log(`\n🔑 Código de pareamento: ${code}`);
+        console.log('No WhatsApp: Configurações > Aparelhos conectados > Conectar aparelho > Conectar com número de telefone\n');
+      } catch {
+        console.log('\n📱 Falha ao gerar código — escaneie o QR Code abaixo:\n');
+        qrcode.generate(qr, { small: true });
+      }
+    } else {
+      console.log('\n📱 Escaneie o QR Code abaixo com o número do assistente:\n');
+      qrcode.generate(qr, { small: true });
+    }
   });
 
   client.on('ready', () => {
