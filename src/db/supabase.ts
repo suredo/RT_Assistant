@@ -28,6 +28,16 @@ export async function saveDemand(demand: Omit<Demand, 'id' | 'status' | 'created
   return data;
 }
 
+export type DemandUpdate = Partial<Pick<Demand, 'summary' | 'category' | 'priority' | 'status'>>;
+
+export async function updateDemand(id: string, fields: DemandUpdate): Promise<void> {
+  const { error } = await supabase
+    .from('demands')
+    .update(fields)
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function resolveDemand(id: string): Promise<void> {
   const { error } = await supabase
     .from('demands')

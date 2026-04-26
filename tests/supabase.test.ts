@@ -18,7 +18,7 @@ jest.mock('@supabase/supabase-js', () => ({
   })
 }));
 
-import { saveDemand, resolveDemand, getOpenDemands } from '../src/db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands } from '../src/db/supabase';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -52,6 +52,25 @@ describe('saveDemand()', () => {
     await expect(
       saveDemand({ message: 'x', summary: 'x', category: 'routine', priority: 'low' })
     ).rejects.toThrow('DB error');
+  });
+});
+
+describe('updateDemand()', () => {
+  test('updates the given fields for the demand id', async () => {
+    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+    await updateDemand('abc-123', { priority: 'high', summary: 'Updated summary' });
+
+    expect(mockUpdate).toHaveBeenCalledWith({ priority: 'high', summary: 'Updated summary' });
+    expect(mockUpdateEq).toHaveBeenCalledWith('id', 'abc-123');
+  });
+
+  test('throws when Supabase returns an error', async () => {
+    const mockUpdateEq = jest.fn().mockResolvedValue({ error: new Error('Update failed') });
+    mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+    await expect(updateDemand('abc-123', { priority: 'low' })).rejects.toThrow('Update failed');
   });
 });
 
