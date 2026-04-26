@@ -11,19 +11,16 @@ import {
 } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule } from '../briefing';
-
-const PRIORITY_EMOJI: Record<string, string> = { high: '🔴', medium: '🟡', low: '⚪' };
+import { formatDemand } from '../format';
 
 function confirmationPrompt(action: PendingAction): string {
   if (action.type === 'save') {
-    const { summary, category, priority } = action.demand;
-    return `📝 Vou registrar esta demanda:\n\n*Resumo:* ${summary}\n*Categoria:* ${category}\n*Prioridade:* ${PRIORITY_EMOJI[priority] ?? ''} ${priority}\n\nConfirma? (sim/não)`;
+    return `📝 Vou registrar esta demanda:\n${formatDemand(action.demand, { showCategory: true })}\n\nConfirma? (sim/não)`;
   }
   if (action.type === 'update') {
-    const { summary, priority } = action.fields;
-    return `✏️ Vou atualizar a demanda:\n\n*Novo resumo:* ${summary}\n*Prioridade:* ${PRIORITY_EMOJI[priority] ?? ''} ${priority}\n\nConfirma? (sim/não)`;
+    return `✏️ Vou atualizar a demanda:\n${formatDemand(action.fields)}\n\nConfirma? (sim/não)`;
   }
-  return `✅ Vou marcar como resolvida:\n*${action.demandSummary}*\n\nConfirma? (sim/não)`;
+  return `✅ Vou marcar como resolvida:\n${formatDemand({ priority: action.demandPriority, summary: action.demandSummary })}\n\nConfirma? (sim/não)`;
 }
 
 async function executePendingAction(action: PendingAction): Promise<void> {
@@ -156,7 +153,7 @@ async function createClient(): Promise<void> {
       if (target?.id) {
         let action: PendingAction;
         if (classification.resolved) {
-          action = { type: 'resolve', demandId: target.id, demandSummary: target.summary };
+          action = { type: 'resolve', demandId: target.id, demandPriority: target.priority, demandSummary: target.summary };
         } else {
           const mergedSummary = await mergeSummary(target.summary, msg.body);
           action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
@@ -175,7 +172,7 @@ async function createClient(): Promise<void> {
     let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
     if (role === 'rt' && openDemands.length) {
       const demandList = openDemands
-        .map((d, i) => `${i + 1}. [${d.priority}] ${d.summary} (${d.category})`)
+        .map((d, i) => formatDemand(d, { index: i + 1 }))
         .join('\n');
       systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
     }

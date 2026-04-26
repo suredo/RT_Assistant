@@ -38,6 +38,7 @@ npm run test:watch  # watch mode during development
 | `src/ai/context.ts` | `tests/context.test.ts` |
 | `src/db/supabase.ts` | `tests/supabase.test.ts` |
 | `src/briefing.ts` | `tests/briefing.test.ts` |
+| `src/format.ts` | `tests/format.test.ts` |
 | `src/audio/transcribe.ts` | `tests/transcribe.test.ts` |
 
 ### What to test

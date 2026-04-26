@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { Client } from 'whatsapp-web.js';
 import { getOpenDemands } from './db/supabase';
+import { formatDemand } from './format';
 
 export function formatBriefing(demands: Array<{ priority: string; summary: string }>): string {
   const high = demands.filter(d => d.priority === 'high');
@@ -10,13 +11,13 @@ export function formatBriefing(demands: Array<{ priority: string; summary: strin
 
   if (high.length) {
     text += `🔴 *Urgente (${high.length}):*\n`;
-    high.forEach(d => { text += `  • ${d.summary}\n`; });
+    high.forEach(d => { text += `  • ${formatDemand(d)}\n`; });
     text += '\n';
   }
 
   if (others.length) {
     text += `🟡 *Pendente (${others.length}):*\n`;
-    others.forEach(d => { text += `  • ${d.summary}\n`; });
+    others.forEach(d => { text += `  • ${formatDemand(d)}\n`; });
   }
 
   if (!demands.length) {

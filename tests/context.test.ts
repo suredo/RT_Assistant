@@ -70,14 +70,14 @@ describe('pending action store', () => {
   });
 
   test('clears the pending action', () => {
-    setPendingAction('5563999999999', { type: 'resolve', demandId: 'abc', demandSummary: 'resumo' });
+    setPendingAction('5563999999999', { type: 'resolve', demandId: 'abc', demandPriority: 'high', demandSummary: 'resumo' });
     clearPendingAction('5563999999999');
     expect(getPendingAction('5563999999999')).toBeNull();
   });
 
   test('different senders have independent pending actions', () => {
-    setPendingAction('sender_a', { type: 'resolve', demandId: 'id-a', demandSummary: 'A' });
-    setPendingAction('sender_b', { type: 'resolve', demandId: 'id-b', demandSummary: 'B' });
+    setPendingAction('sender_a', { type: 'resolve', demandId: 'id-a', demandPriority: 'high', demandSummary: 'A' });
+    setPendingAction('sender_b', { type: 'resolve', demandId: 'id-b', demandPriority: 'low', demandSummary: 'B' });
 
     expect((getPendingAction('sender_a') as any).demandId).toBe('id-a');
     expect((getPendingAction('sender_b') as any).demandId).toBe('id-b');
