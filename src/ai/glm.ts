@@ -23,6 +23,13 @@ Responda sempre em português, de forma direta e concisa.
 Use emojis para indicar prioridade: 🔴 urgente, 🟡 média, ⚪ rotina.
 Nunca invente informações — se não souber, pergunte.`;
 
+// Prompt for team members — restricted to adding demands only
+export const TEAM_PROMPT = `Você é um assistente de registro de demandas de uma clínica de hemodiálise.
+Sua função é APENAS receber e confirmar novas demandas ou informações da equipe.
+NÃO responda consultas, relatórios, listagens ou perguntas sobre o status de demandas — isso é função exclusiva da RT.
+Se alguém pedir informações ou consultas, responda educadamente que apenas a RT pode acessar essas informações.
+Confirme sempre a demanda recebida com um resumo curto e o emoji de prioridade estimada: 🔴 urgente, 🟡 média, ⚪ rotina.`;
+
 // Raw API call — passes messages directly, no system prompt injected.
 // Used by classifier.ts which builds its own message array.
 export async function chat(messages: Message[]): Promise<string> {
@@ -34,11 +41,11 @@ export async function chat(messages: Message[]): Promise<string> {
   return response.data.choices[0].message.content as string;
 }
 
-// Higher-level call for conversational replies — prepends SYSTEM_PROMPT automatically.
-export async function reply(userMessage: string, history: Message[] = []): Promise<string> {
+// Higher-level call for conversational replies — prepends the given prompt (defaults to SYSTEM_PROMPT).
+export async function reply(userMessage: string, history: Message[] = [], prompt = SYSTEM_PROMPT): Promise<string> {
   try {
     const messages: Message[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: prompt },
       ...history,
       { role: 'user', content: userMessage }
     ];

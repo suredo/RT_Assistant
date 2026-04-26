@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { chat, reply } from '../src/ai/glm';
+import { chat, reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../src/ai/glm';
 
 jest.mock('axios');
 const mockPost = jest.mocked(axios.post);
@@ -50,6 +50,28 @@ describe('reply()', () => {
     const body = mockPost.mock.calls[0][1] as { messages: Array<{ role: string; content: string }> };
     expect(body.messages[0].role).toBe('system');
     expect(body.messages[0].content).toBeTruthy();
+  });
+
+  test('uses SYSTEM_PROMPT by default', async () => {
+    mockPost.mockResolvedValue({
+      data: { choices: [{ message: { content: 'ok' } }] }
+    });
+
+    await reply('oi');
+
+    const body = mockPost.mock.calls[0][1] as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages[0].content).toBe(SYSTEM_PROMPT);
+  });
+
+  test('uses custom prompt when provided', async () => {
+    mockPost.mockResolvedValue({
+      data: { choices: [{ message: { content: 'ok' } }] }
+    });
+
+    await reply('oi', [], TEAM_PROMPT);
+
+    const body = mockPost.mock.calls[0][1] as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages[0].content).toBe(TEAM_PROMPT);
   });
 
   test('includes conversation history between system prompt and new message', async () => {

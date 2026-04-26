@@ -1,6 +1,7 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
-import { reply } from '../ai/glm';
+import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
+import { getRole } from './auth';
 
 async function createClient(): Promise<void> {
   const client = new Client({
@@ -46,12 +47,19 @@ async function createClient(): Promise<void> {
     if (msg.from.includes('@g.us')) return;
     if (msg.fromMe) return;
 
-    console.log(`\n📩 [${new Date().toLocaleTimeString()}] ${msg.from}: ${msg.body}`);
+    const role = getRole(msg.from);
+    if (!role) {
+      console.warn(`⚠️ Mensagem ignorada de número não autorizado: ${msg.from}`);
+      return;
+    }
+
+    console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${msg.from}: ${msg.body}`);
 
     const chat = await msg.getChat();
     await chat.sendStateTyping();
 
-    const response = await reply(msg.body);
+    const prompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+    const response = await reply(msg.body, [], prompt);
 
     console.log(`🤖 Resposta: ${response}\n`);
     await msg.reply(response);
