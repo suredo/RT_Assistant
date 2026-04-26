@@ -1,7 +1,7 @@
 # RT Assistant — Development Document
 
 > AI Assistant for the Head Nurse (RT) of a Hemodialysis Clinic  
-> Status: **In Development — Week 2** | Last updated: April 2026
+> Status: **In Development — Week 3** | Last updated: April 2026
 
 ---
 
@@ -54,9 +54,9 @@ Use **whatsapp-web.js** or **Baileys** to connect the AI to a regular WhatsApp n
 **What the AI does:**
 - [x] Receive text messages from the RT
 - [ ] Automatically transcribe audio messages (Week 4)
-- [ ] Classify each demand by category and urgency (Week 2)
-- [ ] Log demands with timestamp and context (Week 2)
-- [ ] Answer the RT's queries about open items (Week 2)
+- [x] Classify each demand by category and urgency (Week 2)
+- [x] Log demands with timestamp and context (Week 2)
+- [x] Answer the RT's queries about open items (Week 2)
 - [ ] Mark demands as resolved through conversation (Week 2)
 - [ ] Generate a daily briefing at the start of each shift (Week 3)
 - [ ] List what was left pending from the previous day (Week 3)
@@ -555,7 +555,7 @@ The pilot will be considered successful after 30 days if:
 | 3 | Build conversation prototype (message flows) | Tech | 🔲 Pending |
 | 4 | Prepare pitch for clinic management | Business | 🔲 Pending |
 | 5 | Set up server and WhatsApp integration | Tech | ✅ Done |
-| 6 | Develop Phase 1 — MVP | Tech | 🔄 In progress (Week 2 of 4) |
+| 6 | Develop Phase 1 — MVP | Tech | 🔄 In progress (Week 3 of 4) |
 | 7 | Test with Bianca for 2 weeks | Tech + Business | 🔲 Pending |
 | 8 | Collect feedback and iterate | Tech | 🔲 Pending |
 
@@ -789,7 +789,7 @@ Send test messages from the RT number to the assistant number:
 | Test message | What to validate |
 |---|---|
 | `"oi"` | Assistant responds in Portuguese |
-| `"o que está pendente?"` | Responds that there are no records yet (Week 2 adds database) |
+| `"o que está pendente?"` | Lists open demands from Supabase (or "Nenhuma demanda em aberto" if empty) |
 | `"paciente na cadeira 3 com pressão baixa"` | Classified as clinical urgent |
 | `"preciso cobrir o turno amanhã"` | Classified as team management |
 | Message from an unknown number | No reply; warning logged |
@@ -938,11 +938,11 @@ client.on('message', async msg => {
 
 ### 11.4 Week 2 completion checklist
 
-- [ ] Demands saved to Supabase after every new demand message
-- [ ] "What is pending?" returns open demands from the database
-- [ ] "What is urgent?" returns only high-priority open items
-- [ ] Conversation buffer keeps context across a multi-message exchange
-- [ ] No data lost if the bot restarts (database is the source of truth)
+- [x] Demands saved to Supabase after every new demand message
+- [x] "What is pending?" returns open demands from the database
+- [x] "What is urgent?" returns only high-priority open items
+- [x] Conversation buffer keeps context across a multi-message exchange
+- [x] No data lost if the bot restarts (database is the source of truth)
 
 ---
 

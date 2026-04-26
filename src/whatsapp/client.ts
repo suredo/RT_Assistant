@@ -2,6 +2,9 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { getRole } from './auth';
+import { classify } from '../ai/classifier';
+import { getHistory, addTurn } from '../ai/context';
+import { saveDemand, getOpenDemands } from '../db/supabase';
 
 async function createClient(): Promise<void> {
   const client = new Client({
@@ -60,11 +63,43 @@ async function createClient(): Promise<void> {
 
     console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${senderNumber}: ${msg.body}`);
 
-    const chat = await msg.getChat();
-    await chat.sendStateTyping();
+    const msgChat = await msg.getChat();
+    await msgChat.sendStateTyping();
 
-    const prompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-    const response = await reply(msg.body, [], prompt);
+    const classification = await classify(msg.body);
+
+    if (classification.type === 'new_demand') {
+      try {
+        await saveDemand({
+          message: msg.body,
+          summary: classification.summary,
+          category: classification.category,
+          priority: classification.priority
+        });
+      } catch (err) {
+        console.error('⚠️ Erro ao salvar demanda:', err);
+      }
+    }
+
+    let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+    if (role === 'rt') {
+      try {
+        const openDemands = await getOpenDemands({ days: 7 });
+        if (openDemands.length) {
+          const demandList = openDemands
+            .map(d => `- [${d.priority}] ${d.summary} (${d.category})`)
+            .join('\n');
+          systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}`;
+        }
+      } catch (err) {
+        console.error('⚠️ Erro ao buscar demandas:', err);
+      }
+    }
+
+    const history = getHistory(senderNumber);
+    const response = await reply(msg.body, history, systemPrompt);
+    addTurn(senderNumber, 'user', msg.body);
+    addTurn(senderNumber, 'assistant', response);
 
     console.log(`🤖 Resposta: ${response}\n`);
     await msg.reply(response);
