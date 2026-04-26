@@ -1,4 +1,9 @@
-import { getHistory, addTurn, _reset } from '../src/ai/context';
+import {
+  getHistory, addTurn,
+  setPendingAction, getPendingAction, clearPendingAction,
+  isConfirmation, isRejection,
+  _reset
+} from '../src/ai/context';
 
 describe('conversation buffer', () => {
   beforeEach(() => _reset());
@@ -37,5 +42,68 @@ describe('conversation buffer', () => {
     expect(getHistory('sender_a')).toHaveLength(1);
     expect(getHistory('sender_b')).toHaveLength(1);
     expect(getHistory('sender_a')[0].content).toBe('message from A');
+  });
+});
+
+describe('pending action store', () => {
+  beforeEach(() => _reset());
+
+  test('returns null for a sender with no pending action', () => {
+    expect(getPendingAction('5563999999999')).toBeNull();
+  });
+
+  test('stores and retrieves a pending save action', () => {
+    const action = {
+      type: 'save' as const,
+      demand: { message: 'texto', summary: 'resumo', category: 'rotina', priority: 'low' }
+    };
+    setPendingAction('5563999999999', action);
+    expect(getPendingAction('5563999999999')).toEqual(action);
+  });
+
+  test('clears the pending action', () => {
+    setPendingAction('5563999999999', { type: 'resolve', demandId: 'abc', demandSummary: 'resumo' });
+    clearPendingAction('5563999999999');
+    expect(getPendingAction('5563999999999')).toBeNull();
+  });
+
+  test('different senders have independent pending actions', () => {
+    setPendingAction('sender_a', { type: 'resolve', demandId: 'id-a', demandSummary: 'A' });
+    setPendingAction('sender_b', { type: 'resolve', demandId: 'id-b', demandSummary: 'B' });
+
+    expect((getPendingAction('sender_a') as any).demandId).toBe('id-a');
+    expect((getPendingAction('sender_b') as any).demandId).toBe('id-b');
+  });
+});
+
+describe('isConfirmation()', () => {
+  test.each(['sim', 'Sim', 'SIM', 'pode', 'confirma', 'ok', 'salva', 'correto', 'certo', 's'])(
+    'returns true for "%s"', (word) => {
+      expect(isConfirmation(word)).toBe(true);
+    }
+  );
+
+  test('returns false for a rejection word', () => {
+    expect(isConfirmation('não')).toBe(false);
+  });
+
+  test('returns false for an unrelated message', () => {
+    expect(isConfirmation('o que está pendente?')).toBe(false);
+  });
+});
+
+describe('isRejection()', () => {
+  test.each(['não', 'nao', 'cancela', 'para', 'errado', 'n'])(
+    'returns true for "%s"', (word) => {
+      expect(isRejection(word)).toBe(true);
+    }
+  );
+
+  test('returns false for a confirmation word', () => {
+    expect(isRejection('sim')).toBe(false);
+  });
+
+  test('returns false for an unrelated message', () => {
+    expect(isRejection('paciente na cadeira 3')).toBe(false);
   });
 });

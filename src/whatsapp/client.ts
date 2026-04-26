@@ -3,9 +3,38 @@ import qrcode from 'qrcode-terminal';
 import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { getRole } from './auth';
 import { classify, mergeSummary } from '../ai/classifier';
-import { getHistory, addTurn } from '../ai/context';
+import {
+  getHistory, addTurn,
+  getPendingAction, setPendingAction, clearPendingAction,
+  isConfirmation, isRejection,
+  PendingAction
+} from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule } from '../briefing';
+
+const PRIORITY_EMOJI: Record<string, string> = { high: '🔴', medium: '🟡', low: '⚪' };
+
+function confirmationPrompt(action: PendingAction): string {
+  if (action.type === 'save') {
+    const { summary, category, priority } = action.demand;
+    return `📝 Vou registrar esta demanda:\n\n*Resumo:* ${summary}\n*Categoria:* ${category}\n*Prioridade:* ${PRIORITY_EMOJI[priority] ?? ''} ${priority}\n\nConfirma? (sim/não)`;
+  }
+  if (action.type === 'update') {
+    const { summary, priority } = action.fields;
+    return `✏️ Vou atualizar a demanda:\n\n*Novo resumo:* ${summary}\n*Prioridade:* ${PRIORITY_EMOJI[priority] ?? ''} ${priority}\n\nConfirma? (sim/não)`;
+  }
+  return `✅ Vou marcar como resolvida:\n*${action.demandSummary}*\n\nConfirma? (sim/não)`;
+}
+
+async function executePendingAction(action: PendingAction): Promise<void> {
+  if (action.type === 'save') {
+    await saveDemand(action.demand);
+  } else if (action.type === 'update') {
+    await updateDemand(action.demandId, action.fields);
+  } else {
+    await resolveDemand(action.demandId);
+  }
+}
 
 async function createClient(): Promise<void> {
   const client = new Client({
@@ -68,7 +97,31 @@ async function createClient(): Promise<void> {
     const msgChat = await msg.getChat();
     await msgChat.sendStateTyping();
 
-    // Fetch open demands first — needed for both the system prompt and update resolution
+    // ── Check for a pending confirmation ─────────────────────────────────────
+    const pending = getPendingAction(senderNumber);
+    if (pending) {
+      if (isConfirmation(msg.body)) {
+        try {
+          await executePendingAction(pending);
+          clearPendingAction(senderNumber);
+          await msg.reply('✅ Feito!');
+        } catch (err) {
+          console.error('⚠️ Erro ao executar ação pendente:', err);
+          clearPendingAction(senderNumber);
+          await msg.reply('⚠️ Erro ao executar a ação. Tente novamente.');
+        }
+        return;
+      }
+      if (isRejection(msg.body)) {
+        clearPendingAction(senderNumber);
+        await msg.reply('Cancelado. Como posso ajudar?');
+        return;
+      }
+      // Unrelated message — clear pending and process normally
+      clearPendingAction(senderNumber);
+    }
+
+    // ── Fetch open demands (RT only) ─────────────────────────────────────────
     let openDemands: Demand[] = [];
     if (role === 'rt') {
       try {
@@ -78,40 +131,42 @@ async function createClient(): Promise<void> {
       }
     }
 
+    // ── Classify ─────────────────────────────────────────────────────────────
     const classification = await classify(msg.body);
 
+    // ── Stage write actions — ask for confirmation instead of writing directly ─
     if (classification.type === 'new_demand') {
-      try {
-        await saveDemand({
+      const action: PendingAction = {
+        type: 'save',
+        demand: {
           message: msg.body,
           summary: classification.summary,
           category: classification.category,
           priority: classification.priority
-        });
-      } catch (err) {
-        console.error('⚠️ Erro ao salvar demanda:', err);
-      }
+        }
+      };
+      setPendingAction(senderNumber, action);
+      await msg.reply(confirmationPrompt(action));
+      return;
     }
 
     if (classification.type === 'update' && classification.demandIndex !== null) {
       const target = openDemands[classification.demandIndex - 1];
       if (target?.id) {
-        try {
-          if (classification.resolved) {
-            await resolveDemand(target.id);
-          } else {
-            const mergedSummary = await mergeSummary(target.summary, msg.body);
-            await updateDemand(target.id, {
-              priority: classification.priority,
-              summary: mergedSummary
-            });
-          }
-        } catch (err) {
-          console.error('⚠️ Erro ao atualizar demanda:', err);
+        let action: PendingAction;
+        if (classification.resolved) {
+          action = { type: 'resolve', demandId: target.id, demandSummary: target.summary };
+        } else {
+          const mergedSummary = await mergeSummary(target.summary, msg.body);
+          action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
         }
+        setPendingAction(senderNumber, action);
+        await msg.reply(confirmationPrompt(action));
+        return;
       }
     }
 
+    // ── LLM reply for queries and unmatched messages ──────────────────────────
     let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
     if (role === 'rt' && openDemands.length) {
       const demandList = openDemands
