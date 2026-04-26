@@ -2,7 +2,7 @@ import { chat } from './glm';
 
 export interface Classification {
   type: 'new_demand' | 'update' | 'query' | 'other';
-  category: 'clinical_urgent' | 'team_management' | 'medical_team' | 'administrative' | 'regulatory' | 'routine';
+  category: 'urgência clínica' | 'gestão de equipe' | 'equipe médica' | 'administrativo' | 'regulatório' | 'rotina';
   priority: 'high' | 'medium' | 'low';
   summary: string;
   demandIndex: number | null; // 1-based index of the demand being referenced, if any
@@ -11,7 +11,7 @@ export interface Classification {
 
 const FALLBACK: Classification = {
   type: 'new_demand',
-  category: 'routine',
+  category: 'rotina',
   priority: 'low',
   summary: 'Demanda não classificada',
   demandIndex: null,
@@ -21,7 +21,7 @@ const FALLBACK: Classification = {
 const CLASSIFY_PROMPT = `Você é um classificador de demandas de uma clínica de hemodiálise.
 Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
 - type: "new_demand" | "update" | "query" | "other"
-- category: "clinical_urgent" | "team_management" | "medical_team" | "administrative" | "regulatory" | "routine"
+- category: "urgência clínica" | "gestão de equipe" | "equipe médica" | "administrativo" | "regulatório" | "rotina"
 - priority: "high" | "medium" | "low"
 - summary: resumo curto da demanda em português (máximo 80 caracteres)
 - demandIndex: número inteiro da demanda referenciada (ex: se a mensagem menciona "demanda 2" retorne 2), ou null se não há referência

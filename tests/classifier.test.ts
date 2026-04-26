@@ -9,7 +9,7 @@ describe('classify()', () => {
 
   test('parses valid JSON from LLM', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
-      category: 'clinical_urgent',
+      category: 'urgência clínica',
       priority: 'high',
       type: 'new_demand',
       summary: 'Paciente na cadeira 3 com pressão baixa',
@@ -19,7 +19,7 @@ describe('classify()', () => {
 
     const result = await classify('paciente na cadeira 3 com pressão baixa');
 
-    expect(result.category).toBe('clinical_urgent');
+    expect(result.category).toBe('urgência clínica');
     expect(result.priority).toBe('high');
     expect(result.type).toBe('new_demand');
     expect(result.summary).toBeTruthy();
@@ -30,7 +30,7 @@ describe('classify()', () => {
   test('extracts demandIndex and resolved=true for a resolution message', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
       type: 'update',
-      category: 'routine',
+      category: 'rotina',
       priority: 'low',
       summary: 'Demanda 2 resolvida',
       demandIndex: 2,
@@ -47,7 +47,7 @@ describe('classify()', () => {
   test('extracts demandIndex with resolved=false for a priority update', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
       type: 'update',
-      category: 'clinical_urgent',
+      category: 'urgência clínica',
       priority: 'high',
       summary: 'Atualização de prioridade da demanda 1',
       demandIndex: 1,
@@ -74,7 +74,7 @@ describe('classify()', () => {
 
     const result = await classify('alguma mensagem');
 
-    expect(result.category).toBe('routine');
+    expect(result.category).toBe('rotina');
     expect(result.priority).toBe('low');
     expect(result.type).toBe('new_demand');
     expect(result.demandIndex).toBeNull();
@@ -106,7 +106,7 @@ describe('classify()', () => {
     const result = await classify('atualizando demanda');
 
     expect(result.type).toBe('update');
-    expect(result.category).toBe('routine');
+    expect(result.category).toBe('rotina');
     expect(result.priority).toBe('low');
     expect(result.demandIndex).toBeNull();
     expect(result.resolved).toBe(false);
@@ -115,7 +115,7 @@ describe('classify()', () => {
   test('ignores demandIndex when LLM returns a non-number value', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
       type: 'update',
-      category: 'routine',
+      category: 'rotina',
       priority: 'low',
       summary: 'Atualização',
       demandIndex: 'dois',
