@@ -35,7 +35,7 @@ Confirme sempre a demanda recebida com um resumo curto e o emoji de prioridade e
 export async function chat(messages: Message[]): Promise<string> {
   const response = await axios.post(
     GLM_URL as string,
-    { model: 'GLM-4.7', messages, temperature: 0.3 },
+    { model: 'GLM-5', messages, temperature: 0 },
     { headers: { Authorization: `Bearer ${GLM_KEY}`, 'Content-Type': 'application/json' } }
   );
   return response.data.choices[0].message.content as string;
