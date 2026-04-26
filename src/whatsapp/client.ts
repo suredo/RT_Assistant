@@ -47,13 +47,18 @@ async function createClient(): Promise<void> {
     if (msg.from.includes('@g.us')) return;
     if (msg.fromMe) return;
 
-    const role = getRole(msg.from);
+    // msg.from may be an @lid (internal WhatsApp Linked Device ID) instead of
+    // the phone number — resolve the contact to get the actual number.
+    const contact = await msg.getContact();
+    const senderNumber = contact.number || msg.from;
+
+    const role = getRole(senderNumber);
     if (!role) {
-      console.warn(`⚠️ Mensagem ignorada de número não autorizado: ${msg.from}`);
+      console.warn(`⚠️ Mensagem ignorada de número não autorizado: ${senderNumber}`);
       return;
     }
 
-    console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${msg.from}: ${msg.body}`);
+    console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${senderNumber}: ${msg.body}`);
 
     const chat = await msg.getChat();
     await chat.sendStateTyping();
