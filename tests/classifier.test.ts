@@ -1,4 +1,4 @@
-import { classify } from '../src/ai/classifier';
+import { classify, mergeSummary } from '../src/ai/classifier';
 import { chat } from '../src/ai/glm';
 
 jest.mock('../src/ai/glm');
@@ -125,5 +125,36 @@ describe('classify()', () => {
     const result = await classify('alguma mensagem');
 
     expect(result.demandIndex).toBeNull();
+  });
+});
+
+describe('mergeSummary()', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns the merged summary from the LLM', async () => {
+    mockChat.mockResolvedValue('Paciente na cadeira 3 — médico presente, estabilizando');
+
+    const result = await mergeSummary(
+      'Paciente na cadeira 3 com pressão baixa',
+      'médico já chegou, estabilizando'
+    );
+
+    expect(result).toBe('Paciente na cadeira 3 — médico presente, estabilizando');
+  });
+
+  test('falls back to existing summary when LLM returns empty string', async () => {
+    mockChat.mockResolvedValue('   ');
+
+    const result = await mergeSummary('Resumo existente', 'nova info');
+
+    expect(result).toBe('Resumo existente');
+  });
+
+  test('falls back to existing summary when LLM call throws', async () => {
+    mockChat.mockRejectedValue(new Error('API timeout'));
+
+    const result = await mergeSummary('Resumo existente', 'nova info');
+
+    expect(result).toBe('Resumo existente');
   });
 });

@@ -2,7 +2,7 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { getRole } from './auth';
-import { classify } from '../ai/classifier';
+import { classify, mergeSummary } from '../ai/classifier';
 import { getHistory, addTurn } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule } from '../briefing';
@@ -100,9 +100,10 @@ async function createClient(): Promise<void> {
           if (classification.resolved) {
             await resolveDemand(target.id);
           } else {
+            const mergedSummary = await mergeSummary(target.summary, msg.body);
             await updateDemand(target.id, {
               priority: classification.priority,
-              summary: classification.summary
+              summary: mergedSummary
             });
           }
         } catch (err) {

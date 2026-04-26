@@ -30,6 +30,23 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
 
+const MERGE_PROMPT = `Você está atualizando o resumo de uma demanda clínica.
+Combine o resumo atual com a nova informação em um único resumo coeso, em português, máximo 120 caracteres.
+Preserve o contexto original e acrescente o que for novo — não substitua, adicione.
+Retorne APENAS o resumo combinado, sem explicações.`;
+
+export async function mergeSummary(existingSummary: string, newMessage: string): Promise<string> {
+  try {
+    const result = await chat([
+      { role: 'system', content: MERGE_PROMPT },
+      { role: 'user', content: `Resumo atual: "${existingSummary}"\nNova informação: "${newMessage}"` }
+    ]);
+    return result.trim() || existingSummary;
+  } catch {
+    return existingSummary;
+  }
+}
+
 export async function classify(message: string): Promise<Classification> {
   try {
     const raw = await chat([
