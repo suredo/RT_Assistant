@@ -16,7 +16,8 @@ Follow this sequence for every task — no exceptions:
 2. **Write tests first** — create or update the test file in `tests/` before implementing
 3. **Implement** — write the feature
 4. **Run tests** — `npm test` must pass with zero failures
-5. **Commit** — only after tests are green
+5. **Update docs** — see Documentation Rules below
+6. **Commit** — only after tests are green and docs are updated
 
 ---
 
@@ -59,12 +60,30 @@ See `RT_Assistant_Development.md` Section 14 for full test examples for each mod
 
 ---
 
+## Documentation Rules
+
+After every feature implementation, update `RT_Assistant_Development.md` before committing:
+
+| Event | What to update |
+|---|---|
+| Feature from Phase 1 list completed | Check `- [ ]` → `- [x]` in Section 3 |
+| Week N checklist item completed | Check `- [ ]` → `- [x]` in Section 10.10 / 11.4 / 12.3 / 13.4 |
+| Entire week completed | Update status header (`> Status:`) and Next Steps table (Section 9) |
+| New env var added | Add row to env table in Section 5 and update `.env.example` |
+| New module added | Add row to module→test table in `CLAUDE.md` and update Section 14 test examples |
+| Architecture or decision changed | Update the relevant section so the doc matches the code |
+
+**The docs are the source of truth for any new AI context window.** If the code diverges from the docs, future sessions will implement things incorrectly. Keep them in sync.
+
+---
+
 ## Pre-commit Checklist
 
 Before every commit, verify all of the following:
 
 - [ ] `npm test` passes — zero failures, zero errors
 - [ ] New module has a corresponding test file
+- [ ] `RT_Assistant_Development.md` checkboxes and status updated (see Documentation Rules)
 - [ ] No API keys, secrets, or real patient data in any file
 - [ ] `.env` is not staged (`git status` should never show `.env`)
 - [ ] Only specific files staged — never `git add .` or `git add -A` blindly
