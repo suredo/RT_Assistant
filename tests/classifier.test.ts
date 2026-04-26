@@ -12,7 +12,9 @@ describe('classify()', () => {
       category: 'clinical_urgent',
       priority: 'high',
       type: 'new_demand',
-      summary: 'Paciente na cadeira 3 com pressão baixa'
+      summary: 'Paciente na cadeira 3 com pressão baixa',
+      demandIndex: null,
+      resolved: false
     }));
 
     const result = await classify('paciente na cadeira 3 com pressão baixa');
@@ -21,10 +23,46 @@ describe('classify()', () => {
     expect(result.priority).toBe('high');
     expect(result.type).toBe('new_demand');
     expect(result.summary).toBeTruthy();
+    expect(result.demandIndex).toBeNull();
+    expect(result.resolved).toBe(false);
+  });
+
+  test('extracts demandIndex and resolved=true for a resolution message', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'update',
+      category: 'routine',
+      priority: 'low',
+      summary: 'Demanda 2 resolvida',
+      demandIndex: 2,
+      resolved: true
+    }));
+
+    const result = await classify('demanda 2 foi resolvida');
+
+    expect(result.type).toBe('update');
+    expect(result.demandIndex).toBe(2);
+    expect(result.resolved).toBe(true);
+  });
+
+  test('extracts demandIndex with resolved=false for a priority update', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'update',
+      category: 'clinical_urgent',
+      priority: 'high',
+      summary: 'Atualização de prioridade da demanda 1',
+      demandIndex: 1,
+      resolved: false
+    }));
+
+    const result = await classify('muda a demanda 1 para urgente');
+
+    expect(result.demandIndex).toBe(1);
+    expect(result.resolved).toBe(false);
+    expect(result.priority).toBe('high');
   });
 
   test('extracts JSON when LLM wraps it in text', async () => {
-    mockChat.mockResolvedValue('Here is the classification: {"type":"query","category":"routine","priority":"low","summary":"Consulta de pendências"}');
+    mockChat.mockResolvedValue('Here is the classification: {"type":"query","category":"routine","priority":"low","summary":"Consulta de pendências","demandIndex":null,"resolved":false}');
 
     const result = await classify('o que está pendente?');
 
@@ -39,6 +77,8 @@ describe('classify()', () => {
     expect(result.category).toBe('routine');
     expect(result.priority).toBe('low');
     expect(result.type).toBe('new_demand');
+    expect(result.demandIndex).toBeNull();
+    expect(result.resolved).toBe(false);
   });
 
   test('falls back gracefully when LLM returns empty response', async () => {
@@ -50,6 +90,8 @@ describe('classify()', () => {
     expect(result).toHaveProperty('priority');
     expect(result).toHaveProperty('type');
     expect(result).toHaveProperty('summary');
+    expect(result).toHaveProperty('demandIndex');
+    expect(result).toHaveProperty('resolved');
   });
 
   test('falls back gracefully when LLM call throws', async () => {
@@ -66,5 +108,22 @@ describe('classify()', () => {
     expect(result.type).toBe('update');
     expect(result.category).toBe('routine');
     expect(result.priority).toBe('low');
+    expect(result.demandIndex).toBeNull();
+    expect(result.resolved).toBe(false);
+  });
+
+  test('ignores demandIndex when LLM returns a non-number value', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'update',
+      category: 'routine',
+      priority: 'low',
+      summary: 'Atualização',
+      demandIndex: 'dois',
+      resolved: false
+    }));
+
+    const result = await classify('alguma mensagem');
+
+    expect(result.demandIndex).toBeNull();
   });
 });

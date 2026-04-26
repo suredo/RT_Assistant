@@ -4,7 +4,7 @@ import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { getRole } from './auth';
 import { classify } from '../ai/classifier';
 import { getHistory, addTurn } from '../ai/context';
-import { saveDemand, getOpenDemands } from '../db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule } from '../briefing';
 
 async function createClient(): Promise<void> {
@@ -68,6 +68,16 @@ async function createClient(): Promise<void> {
     const msgChat = await msg.getChat();
     await msgChat.sendStateTyping();
 
+    // Fetch open demands first — needed for both the system prompt and update resolution
+    let openDemands: Demand[] = [];
+    if (role === 'rt') {
+      try {
+        openDemands = await getOpenDemands({ days: 7 });
+      } catch (err) {
+        console.error('⚠️ Erro ao buscar demandas:', err);
+      }
+    }
+
     const classification = await classify(msg.body);
 
     if (classification.type === 'new_demand') {
@@ -83,19 +93,30 @@ async function createClient(): Promise<void> {
       }
     }
 
-    let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-    if (role === 'rt') {
-      try {
-        const openDemands = await getOpenDemands({ days: 7 });
-        if (openDemands.length) {
-          const demandList = openDemands
-            .map(d => `- [${d.priority}] ${d.summary} (${d.category})`)
-            .join('\n');
-          systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}`;
+    if (classification.type === 'update' && classification.demandIndex !== null) {
+      const target = openDemands[classification.demandIndex - 1];
+      if (target?.id) {
+        try {
+          if (classification.resolved) {
+            await resolveDemand(target.id);
+          } else {
+            await updateDemand(target.id, {
+              priority: classification.priority,
+              summary: classification.summary
+            });
+          }
+        } catch (err) {
+          console.error('⚠️ Erro ao atualizar demanda:', err);
         }
-      } catch (err) {
-        console.error('⚠️ Erro ao buscar demandas:', err);
       }
+    }
+
+    let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+    if (role === 'rt' && openDemands.length) {
+      const demandList = openDemands
+        .map((d, i) => `${i + 1}. [${d.priority}] ${d.summary} (${d.category})`)
+        .join('\n');
+      systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
     }
 
     const history = getHistory(senderNumber);
