@@ -4,7 +4,7 @@ import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { getRole } from './auth';
 import { classify, mergeSummary } from '../ai/classifier';
 import {
-  getHistory, addTurn,
+  getHistory, addTurn, clearHistory,
   getPendingAction, setPendingAction, clearPendingAction,
   isConfirmation, isRejection,
   PendingAction
@@ -104,6 +104,7 @@ async function createClient(): Promise<void> {
         try {
           await executePendingAction(pending);
           clearPendingAction(senderNumber);
+          clearHistory(senderNumber);
           await msg.reply('✅ Feito!');
         } catch (err) {
           console.error('⚠️ Erro ao executar ação pendente:', err);
@@ -167,6 +168,10 @@ async function createClient(): Promise<void> {
     }
 
     // ── LLM reply for queries and unmatched messages ──────────────────────────
+    // Clear history before a query so the answer comes from the DB-injected
+    // system prompt, not from stale conversation context.
+    if (classification.type === 'query') clearHistory(senderNumber);
+
     let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
     if (role === 'rt' && openDemands.length) {
       const demandList = openDemands

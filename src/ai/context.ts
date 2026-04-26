@@ -52,6 +52,10 @@ export function isRejection(message: string): boolean {
 
 // ── Test helper ──────────────────────────────────────────────────────────────
 
+export function clearHistory(sender: string): void {
+  buffers.delete(sender);
+}
+
 export function _reset(): void {
   buffers.clear();
   pendingActions.clear();

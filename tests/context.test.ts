@@ -1,5 +1,5 @@
 import {
-  getHistory, addTurn,
+  getHistory, addTurn, clearHistory,
   setPendingAction, getPendingAction, clearPendingAction,
   isConfirmation, isRejection,
   _reset
@@ -33,6 +33,14 @@ describe('conversation buffer', () => {
     const history = getHistory(sender);
     expect(history.length).toBe(20);
     expect(history[0].content).toBe('message 5');
+  });
+
+  test('clearHistory removes only the given sender', () => {
+    addTurn('sender_x', 'user', 'hello');
+    addTurn('sender_y', 'user', 'hello');
+    clearHistory('sender_x');
+    expect(getHistory('sender_x')).toEqual([]);
+    expect(getHistory('sender_y')).toHaveLength(1);
   });
 
   test('different senders have independent buffers', () => {
