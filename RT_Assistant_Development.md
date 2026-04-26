@@ -182,18 +182,22 @@ Reply via WhatsApp
 rt-assistant/
 ├── src/
 │   ├── whatsapp/
-│   │   └── client.js        # whatsapp-web.js connection
+│   │   ├── client.ts        # whatsapp-web.js connection + reconnect logic
+│   │   └── auth.ts          # role-based authorization (RT vs team vs unknown)
 │   ├── ai/
-│   │   ├── glm.js           # GLM Zhipu integration (development)
-│   │   └── classifier.js    # demand classification logic
+│   │   ├── glm.ts           # GLM Zhipu integration (development)
+│   │   ├── classifier.ts    # demand classification logic
+│   │   └── context.ts       # per-sender conversation buffer
 │   ├── audio/
-│   │   └── transcribe.js    # Whisper transcription
+│   │   └── transcribe.ts    # Whisper transcription
 │   ├── db/
-│   │   └── supabase.js      # database access
-│   └── index.js             # application entry point
+│   │   └── supabase.ts      # database access
+│   └── index.ts             # application entry point
+├── tests/                   # Jest test files (1:1 with src modules)
 ├── .env                     # API keys — never commit
 ├── .env.example             # template without real values
 ├── .gitignore
+├── tsconfig.json
 └── package.json
 ```
 
@@ -205,13 +209,48 @@ mkdir rt-assistant && cd rt-assistant
 git init
 npm init -y
 
-# 2. Core dependencies
-npm install whatsapp-web.js qrcode-terminal
-npm install @supabase/supabase-js
-npm install express dotenv
+# 2. Runtime dependencies
+npm install whatsapp-web.js qrcode-terminal axios dotenv
+npm install @supabase/supabase-js   # Week 2
 
-# 3. Audio transcription
-pip install openai-whisper
+# 3. TypeScript + test tooling
+npm install --save-dev typescript ts-node ts-jest jest
+npm install --save-dev @types/node @types/jest @types/qrcode-terminal
+```
+
+`package.json` scripts:
+```json
+{
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node --watch src/index.ts",
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node"
+  }
+}
+```
+
+`tsconfig.json`:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
 ```
 
 ### Environment variables (.env)
@@ -225,14 +264,25 @@ GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 CLAUDE_API_KEY=your_key_here
 
 # Audio transcription
-OPENAI_API_KEY=your_key_here   # used only for Whisper API calls
+OPENAI_API_KEY=your_key_here
 
 # Database
 SUPABASE_URL=your_url_here
 SUPABASE_KEY=your_key_here
 
-# WhatsApp — authorized number (country code + area code + number, no + or spaces)
+# RT's phone number — used for proactive messaging and authorization
 RT_NUMBER=5563999999999
+# RT's WhatsApp LID — set this if RT_NUMBER authorization fails.
+# Newer WhatsApp versions use Linked Device IDs instead of phone numbers.
+# Copy the value after "from:" in the ⚠️ warning log.
+RT_LID=
+
+# Team members — comma-separated, restricted to adding demands only
+TEAM_NUMBERS=
+TEAM_LIDS=
+
+# Set to the assistant's number to link via pairing code instead of QR scan
+PAIRING_NUMBER=
 
 # Environment
 NODE_ENV=development
@@ -255,40 +305,24 @@ NODE_ENV=development
 
 GLM follows the OpenAI API standard, which makes future migration to Claude or GPT-4o straightforward — just swap the base URL and key.
 
-### Basic connection
+### `src/ai/glm.ts`
 
-```javascript
-// src/ai/glm.js
-const axios = require('axios');
+```typescript
+import axios from 'axios';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const GLM_URL = process.env.GLM_BASE_URL + '/chat/completions';
-const GLM_KEY = process.env.GLM_API_KEY;
-
-async function chat(messages) {
-  const response = await axios.post(GLM_URL, {
-    model: 'glm-4',
-    messages: messages,
-    temperature: 0.3   // more deterministic for classification
-  }, {
-    headers: {
-      'Authorization': `Bearer ${GLM_KEY}`,
-      'Content-Type': 'application/json'
-    }
-  });
-  return response.data.choices[0].message.content;
+export interface Message {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
 }
 
-module.exports = { chat };
-```
+const GLM_URL = `${process.env.GLM_BASE_URL}/chat/completions`;
+const GLM_KEY = process.env.GLM_API_KEY;
 
-### Base system prompt — Phase 1
-
-```javascript
-// Note: prompt kept in Portuguese as the AI interacts with Bianca in Portuguese
-const SYSTEM_PROMPT = `
-Você é um assistente da Enfermeira RT de uma clínica de hemodiálise.
-Seu papel é ajudá-la a organizar demandas, registrar pendências e
-responder consultas sobre o que está em aberto.
+// Kept in Portuguese — the AI interacts with Bianca in Portuguese
+export const SYSTEM_PROMPT = `Você é um assistente da Enfermeira RT de uma clínica de hemodiálise.
+Seu papel é ajudá-la a organizar demandas, registrar pendências e responder consultas sobre o que está em aberto.
 
 Ao receber uma mensagem, identifique se é:
 - Nova demanda (algo que precisa ser feito)
@@ -297,79 +331,40 @@ Ao receber uma mensagem, identifique se é:
 
 Responda sempre em português, de forma direta e concisa.
 Use emojis para indicar prioridade: 🔴 urgente, 🟡 média, ⚪ rotina.
-Nunca invente informações — se não souber, pergunte.
-`;
-```
+Nunca invente informações — se não souber, pergunte.`;
 
-### Demand classification
+// Prompt for team members — restricted to adding demands only
+export const TEAM_PROMPT = `Você é um assistente de registro de demandas de uma clínica de hemodiálise.
+Sua função é APENAS receber e confirmar novas demandas ou informações da equipe.
+NÃO responda consultas, relatórios, listagens ou perguntas sobre o status de demandas — isso é função exclusiva da RT.
+Se alguém pedir informações ou consultas, responda educadamente que apenas a RT pode acessar essas informações.
+Confirme sempre a demanda recebida com um resumo curto e o emoji de prioridade estimada: 🔴 urgente, 🟡 média, ⚪ rotina.`;
 
-```javascript
-// src/ai/classifier.js
-const { chat } = require('./glm');
-
-async function classify(message) {
-  const prompt = [
-    { role: 'system', content: `
-      Classify the message below into:
-      - category: "clinical_urgent" | "team_management" | "medical_team" | "administrative" | "regulatory" | "routine"
-      - priority: "high" | "medium" | "low"
-      - type: "new_demand" | "update" | "query"
-      - summary: short phrase describing the demand
-
-      Respond ONLY with valid JSON, no explanations.
-    `},
-    { role: 'user', content: message }
-  ];
-
-  const response = await chat(prompt);
-
-  try {
-    return JSON.parse(response);
-  } catch {
-    return { category: 'routine', priority: 'low', type: 'new_demand', summary: message };
-  }
+// Raw API call — passes messages directly. Used by classifier.ts which builds its own array.
+export async function chat(messages: Message[]): Promise<string> {
+  const response = await axios.post(
+    GLM_URL as string,
+    { model: 'GLM-4.7', messages, temperature: 0.3 },
+    { headers: { Authorization: `Bearer ${GLM_KEY}`, 'Content-Type': 'application/json' } }
+  );
+  return response.data.choices[0].message.content as string;
 }
 
-module.exports = { classify };
-```
-
-### Main flow — first functional test
-
-```javascript
-// src/index.js
-require('dotenv').config();
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const { chat } = require('./ai/glm');
-const { classify } = require('./ai/classifier');
-
-const client = new Client({ authStrategy: new LocalAuth() });
-
-client.on('qr', qr => {
-  qrcode.generate(qr, { small: true });
-  console.log('Scan the QR Code with WhatsApp');
-});
-
-client.on('ready', () => console.log('✅ RT Assistant connected'));
-
-client.on('message', async msg => {
-  if (msg.fromMe) return;   // ignore messages sent by the assistant itself
-
-  console.log(`📩 Message received: ${msg.body}`);
-
-  const classification = await classify(msg.body);
-  console.log('🏷️  Classification:', classification);
-
-  const history = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: msg.body }
-  ];
-
-  const response = await chat(history);
-  await msg.reply(response);
-});
-
-client.initialize();
+// Higher-level call — prepends the given prompt (defaults to SYSTEM_PROMPT).
+export async function reply(userMessage: string, history: Message[] = [], prompt = SYSTEM_PROMPT): Promise<string> {
+  try {
+    const messages: Message[] = [
+      { role: 'system', content: prompt },
+      ...history,
+      { role: 'user', content: userMessage }
+    ];
+    return await chat(messages);
+  } catch (error: unknown) {
+    const err = error as { response?: { data: unknown }; message: string };
+    console.error('⚠️ GLM error:', err.response?.data ?? err.message);
+    return '⚠️ Erro ao processar sua mensagem. Tente novamente.';
+  }
+}
 ```
 
 ---
@@ -606,15 +601,7 @@ echo "node_modules/\n.env\n.wwebjs_auth/\n.wwebjs_cache/" > .gitignore
 
 ### 10.3 Environment variables
 
-Create the `.env` file at the project root:
-
-```env
-GLM_API_KEY=your_key_here
-GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-NODE_ENV=development
-```
-
-Create `.env.example` to document variables without exposing values:
+Create `.env.example` to document variables without exposing values (copy to `.env` and fill in real values):
 
 ```env
 GLM_API_KEY=
@@ -623,7 +610,16 @@ CLAUDE_API_KEY=
 OPENAI_API_KEY=
 SUPABASE_URL=
 SUPABASE_KEY=
+# RT's phone number — used for proactive messaging and authorization
 RT_NUMBER=
+# RT's WhatsApp LID — set if RT_NUMBER authorization fails (copy from ⚠️ warning log)
+RT_LID=
+# Comma-separated team numbers — restricted to adding demands only
+TEAM_NUMBERS=
+# Comma-separated team LIDs — fallback for team members triggering authorization failures
+TEAM_LIDS=
+# Set to the assistant's number to link via pairing code instead of QR scan
+PAIRING_NUMBER=
 NODE_ENV=development
 ```
 
@@ -631,188 +627,173 @@ NODE_ENV=development
 
 ### 10.4 GLM module
 
-```javascript
-// src/ai/glm.js
-const axios = require('axios');
-require('dotenv').config();
+See Section 5.1 for the full `src/ai/glm.ts` implementation.
 
-const GLM_URL = `${process.env.GLM_BASE_URL}/chat/completions`;
-const GLM_KEY = process.env.GLM_API_KEY;
-
-// Base system prompt — Bianca's context (kept in Portuguese for the AI to interact with her)
-const SYSTEM_PROMPT = `Você é um assistente da Enfermeira RT de uma clínica de hemodiálise.
-Seu papel é ajudá-la a organizar demandas, registrar pendências e responder consultas sobre o que está em aberto.
-
-Ao receber uma mensagem, identifique se é:
-- Nova demanda (algo que precisa ser feito)
-- Atualização de demanda existente (algo foi resolvido ou mudou)
-- Consulta (ela quer saber o que está pendente, urgente, etc.)
-
-Responda sempre em português, de forma direta e concisa.
-Use emojis para indicar prioridade: 🔴 urgente, 🟡 média, ⚪ rotina.
-Nunca invente informações — se não souber, pergunte.`;
-
-async function reply(userMessage, history = []) {
-  try {
-    const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...history,
-      { role: 'user', content: userMessage }
-    ];
-
-    const response = await axios.post(GLM_URL, {
-      model: 'glm-4',
-      messages: messages,
-      temperature: 0.3
-    }, {
-      headers: {
-        'Authorization': `Bearer ${GLM_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    return response.data.choices[0].message.content;
-
-  } catch (error) {
-    console.error('GLM error:', error.response?.data || error.message);
-    return '⚠️ Error processing your message. Please try again.';
-  }
-}
-
-module.exports = { reply, SYSTEM_PROMPT };
-```
+Key exports:
+- `chat(messages)` — raw API call, used by `classifier.ts`
+- `reply(userMessage, history?, prompt?)` — prepends system prompt, used by `client.ts`
+- `SYSTEM_PROMPT` — full RT prompt (queries, management, status)
+- `TEAM_PROMPT` — restricted prompt (add demands only)
+- `Message` — TypeScript interface `{ role: 'system'|'user'|'assistant', content: string }`
 
 ---
 
-### 10.5 WhatsApp client
+### 10.5 WhatsApp client + authorization
 
-```javascript
-// src/whatsapp/client.js
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const { reply } = require('../ai/glm');
+Two files work together:
 
-// Authorized number to use the assistant
-// Format: country code + area code + number, no + or spaces
-// Example: 5563999999999
-const AUTHORIZED_NUMBER = process.env.RT_NUMBER;
+**`src/whatsapp/auth.ts`** — maps sender identifier to a role:
 
-function start() {
+```typescript
+export type Role = 'rt' | 'team';
+
+export function getRole(from: string): Role | null {
+  const rt = process.env.RT_NUMBER?.trim();
+  const rtLid = process.env.RT_LID?.trim();
+  if ((rt && from.includes(rt)) || (rtLid && from.includes(rtLid))) return 'rt';
+
+  const team = (process.env.TEAM_NUMBERS ?? '').split(',').map(n => n.trim()).filter(Boolean);
+  const teamLids = (process.env.TEAM_LIDS ?? '').split(',').map(n => n.trim()).filter(Boolean);
+  if ([...team, ...teamLids].some(n => from.includes(n))) return 'team';
+
+  return null;
+}
+```
+
+> ⚠️ Newer WhatsApp versions use Linked Device IDs (`@lid`) instead of phone numbers. `msg.getContact()` resolves the actual identifier — use `RT_LID` / `TEAM_LIDS` if authorization fails with just phone numbers.
+
+**`src/whatsapp/client.ts`** — connection, QR/pairing code, reconnect, message routing:
+
+```typescript
+import { Client, LocalAuth } from 'whatsapp-web.js';
+import qrcode from 'qrcode-terminal';
+import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
+import { getRole } from './auth';
+
+async function createClient(): Promise<void> {
   const client = new Client({
-    authStrategy: new LocalAuth(),   // saves session locally — no QR scan needed on restart
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    authStrategy: new LocalAuth(),
+    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+  });
+
+  client.on('qr', async (qr: string) => {
+    const pairingNumber = process.env.PAIRING_NUMBER;
+    if (pairingNumber) {
+      try {
+        const code = await client.requestPairingCode(pairingNumber);
+        console.log(`\n🔑 Código de pareamento: ${code}`);
+        console.log('No WhatsApp: Configurações > Aparelhos conectados > Conectar aparelho > Conectar com número de telefone\n');
+      } catch {
+        console.log('\n📱 Falha ao gerar código — escaneie o QR Code abaixo:\n');
+        qrcode.generate(qr, { small: true });
+      }
+    } else {
+      console.log('\n📱 Escaneie o QR Code abaixo com o número do assistente:\n');
+      qrcode.generate(qr, { small: true });
     }
   });
 
-  // Show QR Code in terminal on first run
-  client.on('qr', qr => {
-    console.log('\n📱 Scan the QR Code below with the assistant WhatsApp number:\n');
-    qrcode.generate(qr, { small: true });
+  client.on('ready', () => console.log('✅ RT Assistant conectado e pronto'));
+  client.on('auth_failure', () => console.error('❌ Falha na autenticação — delete .wwebjs_auth e tente novamente'));
+
+  client.on('disconnected', async (reason: string) => {
+    console.warn('⚠️ Desconectado:', reason);
+    try { await client.destroy(); } catch { /* ignore */ }
+    setTimeout(createClient, 5000);
   });
 
-  client.on('ready', () => {
-    console.log('✅ RT Assistant connected and ready');
-  });
+  client.on('message', async (msg) => {
+    if (msg.from.includes('@g.us') || msg.fromMe) return;
 
-  client.on('auth_failure', () => {
-    console.error('❌ Authentication failed — delete .wwebjs_auth folder and try again');
-  });
+    // msg.from may be an @lid — resolve contact to get the stable identifier
+    const contact = await msg.getContact();
+    const senderNumber = contact.number || msg.from;
 
-  client.on('disconnected', reason => {
-    console.warn('⚠️ Disconnected:', reason);
-    // Attempt reconnection after 5 seconds
-    setTimeout(() => client.initialize(), 5000);
-  });
+    const role = getRole(senderNumber);
+    if (!role) {
+      console.warn(`⚠️ Mensagem ignorada de número não autorizado: ${senderNumber}`);
+      return;
+    }
 
-  client.on('message', async msg => {
-    // Ignore group messages in Phase 1
-    if (msg.from.includes('@g.us')) return;
+    console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${senderNumber}: ${msg.body}`);
 
-    // Ignore messages sent by the assistant itself
-    if (msg.fromMe) return;
-
-    // Restrict to authorized number (optional during pilot)
-    // if (AUTHORIZED_NUMBER && !msg.from.includes(AUTHORIZED_NUMBER)) return;
-
-    console.log(`\n📩 [${new Date().toLocaleTimeString()}] Message from ${msg.from}: ${msg.body}`);
-
-    // Show typing indicator
     const chat = await msg.getChat();
     await chat.sendStateTyping();
 
-    // Process with GLM
-    const response = await reply(msg.body);
+    const prompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+    const response = await reply(msg.body, [], prompt);
 
-    console.log(`🤖 Response: ${response}\n`);
-
+    console.log(`🤖 Resposta: ${response}\n`);
     await msg.reply(response);
   });
 
-  client.initialize();
-  return client;
+  // Catch ProtocolError from a still-locked Chrome user data dir — retry with fresh instance
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error('⚠️ Erro na inicialização, tentando novamente em 10s:', err);
+    try { await client.destroy(); } catch { /* ignore */ }
+    setTimeout(createClient, 10000);
+  }
 }
 
-module.exports = { start };
+export function start(): void {
+  createClient().catch(err => console.error('⚠️ Falha fatal ao iniciar cliente:', err));
+}
 ```
 
 ---
 
 ### 10.6 Application entry point
 
-```javascript
-// src/index.js
-require('dotenv').config();
-const { start } = require('./whatsapp/client');
+```typescript
+// src/index.ts
+import dotenv from 'dotenv';
+dotenv.config();
 
-console.log('🚀 Starting RT Assistant...');
+import { start } from './whatsapp/client';
+
+console.log('🚀 Iniciando RT Assistant...');
 start();
-```
-
-Add start scripts to `package.json`:
-
-```json
-{
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
-  }
-}
 ```
 
 ---
 
 ### 10.7 Running for the first time
 
+**Option A — QR Code (default):**
 ```bash
-# Start the assistant
 npm start
-
-# The terminal will display a QR Code
-# Open WhatsApp on the secondary (assistant) number
-# Go to: Linked Devices > Link a Device
-# Scan the QR Code
-
-# After connecting, you will see:
-# ✅ RT Assistant connected and ready
+# Terminal shows a QR Code
+# WhatsApp on the assistant number > Linked Devices > Link a Device > scan
 ```
 
-From that point, any message sent to the secondary number will be processed by GLM and receive a response.
+**Option B — Pairing code:**
+```bash
+# Add to .env:
+PAIRING_NUMBER=5563999999999   # assistant's number
+
+npm start
+# Terminal shows: 🔑 Código de pareamento: ABCD-1234
+# WhatsApp > Configurações > Aparelhos conectados > Conectar com número de telefone
+```
+
+After connecting: `✅ RT Assistant conectado e pronto`
 
 ---
 
 ### 10.8 Testing the flow
 
-Send test messages from your personal number to the assistant number:
+Send test messages from the RT number to the assistant number:
 
 | Test message | What to validate |
 |---|---|
-| `"hi"` | Assistant responds in a contextualized way |
-| `"what is pending?"` | Responds that there are no records yet (Week 2 adds database) |
-| `"patient in chair 3 with low blood pressure"` | Identified as clinical urgent |
-| `"I need to cover the morning shift tomorrow"` | Identified as team management |
-| `"what is the ANVISA report deadline?"` | Responds that it doesn't have that info yet (Week 3) |
+| `"oi"` | Assistant responds in Portuguese |
+| `"o que está pendente?"` | Responds that there are no records yet (Week 2 adds database) |
+| `"paciente na cadeira 3 com pressão baixa"` | Classified as clinical urgent |
+| `"preciso cobrir o turno amanhã"` | Classified as team management |
+| Message from an unknown number | No reply; warning logged |
+| Message from a TEAM_NUMBERS entry | Restricted response — add demands only |
 
 ---
 
@@ -820,10 +801,12 @@ Send test messages from your personal number to the assistant number:
 
 | Issue | Likely cause | Solution |
 |---|---|---|
-| QR Code doesn't appear | Puppeteer not installed correctly | `npm install puppeteer` |
-| Disconnects on its own | Session expired | Delete `.wwebjs_auth/` and scan again |
+| QR Code doesn't appear | Puppeteer not installed | `npm install puppeteer` |
+| `ProtocolError` on reconnect | Stale Chrome lock | Handled automatically — waits 10s and retries |
+| Disconnects on its own | Session expired | Handled automatically — reconnects after 5s |
 | GLM 401 error | Invalid API key | Check `.env` |
-| Message sent but no response | Silent GLM error | Check terminal logs |
+| GLM 1211 error | Invalid model name | Verify model is `GLM-4.7` in `src/ai/glm.ts` |
+| Authorization failing for RT | WhatsApp using LID | Copy value from warning log into `RT_LID` in `.env` |
 | `Cannot find module` | Missing dependency | `npm install` |
 
 ---
@@ -832,12 +815,15 @@ Send test messages from your personal number to the assistant number:
 
 Week 1 is complete when:
 
-- [ ] Project created and versioned in Git
-- [ ] Assistant connects to WhatsApp without errors
-- [ ] Session persists after restart (`npm start` doesn't ask for QR Code again)
-- [ ] Text messages are received and answered by GLM
-- [ ] Logs appear correctly in the terminal
-- [ ] Auto-reconnect works after a drop
+- [x] Project created and versioned in Git
+- [x] TypeScript configured (`tsconfig.json`, `ts-jest`)
+- [x] Assistant connects to WhatsApp without errors
+- [x] Session persists after restart (`npm start` doesn't ask for QR/code again)
+- [x] QR Code and pairing code linking both work
+- [x] Text messages are received and answered by GLM
+- [x] Role-based authorization — RT gets full access, team gets restricted, unknown ignored
+- [x] Logs appear correctly in terminal with role label (`[rt]` / `[team]`)
+- [x] Auto-reconnect works after a drop (ProtocolError handled)
 
 ---
 
@@ -1143,19 +1129,21 @@ Before the live test session, run through these scenarios:
 ### 14.1 Setup
 
 ```bash
-npm install --save-dev jest
+npm install --save-dev jest ts-jest typescript ts-node @types/jest @types/node
 ```
 
 `package.json`:
 ```json
 {
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node --watch src/index.ts",
+    "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch"
   },
   "jest": {
+    "preset": "ts-jest",
     "testEnvironment": "node"
   }
 }
@@ -1165,19 +1153,32 @@ npm install --save-dev jest
 ```
 rt-assistant/
 ├── src/
+│   ├── whatsapp/
+│   │   ├── auth.ts
+│   │   └── client.ts
 │   ├── ai/
-│   │   ├── classifier.js
-│   │   ├── context.js
-│   │   └── glm.js
-│   ├── audio/transcribe.js
-│   ├── db/supabase.js
-│   ├── briefing.js
-│   └── index.js
+│   │   ├── classifier.ts
+│   │   ├── context.ts
+│   │   └── glm.ts
+│   ├── audio/transcribe.ts
+│   ├── db/supabase.ts
+│   ├── briefing.ts
+│   └── index.ts
 └── tests/
-    ├── classifier.test.js
-    ├── context.test.js
-    ├── supabase.test.js
-    └── briefing.test.js
+    ├── auth.test.ts
+    ├── glm.test.ts
+    ├── classifier.test.ts
+    ├── context.test.ts
+    ├── supabase.test.ts
+    └── briefing.test.ts
+```
+
+To get a typed mock of `axios.post`, use `jest.mocked()`:
+```typescript
+import axios from 'axios';
+jest.mock('axios');
+const mockPost = jest.mocked(axios.post);
+// mockPost.mockResolvedValue({ data: { choices: [...] } });
 ```
 
 ---
@@ -1186,16 +1187,19 @@ rt-assistant/
 
 The classifier calls the LLM and parses its JSON response. The fallback when the LLM returns malformed JSON is critical — a broken classifier silently loses demand data.
 
-```javascript
-// tests/classifier.test.js
-const { classify } = require('../src/ai/classifier');
-const { chat } = require('../src/ai/glm');
+```typescript
+// tests/classifier.test.ts
+import { classify } from '../src/ai/classifier';
+import { chat } from '../src/ai/glm';
 
-jest.mock('../src/ai/glm');  // mock the LLM call
+jest.mock('../src/ai/glm');
+const mockChat = jest.mocked(chat);
 
 describe('classify()', () => {
+  beforeEach(() => jest.clearAllMocks());
+
   test('parses valid JSON from LLM', async () => {
-    chat.mockResolvedValue(JSON.stringify({
+    mockChat.mockResolvedValue(JSON.stringify({
       category: 'clinical_urgent',
       priority: 'high',
       type: 'new_demand',
@@ -1211,7 +1215,7 @@ describe('classify()', () => {
   });
 
   test('falls back gracefully when LLM returns malformed JSON', async () => {
-    chat.mockResolvedValue('Sorry, I could not classify this.');  // not JSON
+    mockChat.mockResolvedValue('Sorry, I could not classify this.');
 
     const result = await classify('some message');
 
@@ -1221,7 +1225,7 @@ describe('classify()', () => {
   });
 
   test('falls back gracefully when LLM returns empty response', async () => {
-    chat.mockResolvedValue('');
+    mockChat.mockResolvedValue('');
 
     const result = await classify('some message');
 
@@ -1230,38 +1234,33 @@ describe('classify()', () => {
   });
 
   test('falls back gracefully when LLM call throws', async () => {
-    chat.mockRejectedValue(new Error('API timeout'));
+    mockChat.mockRejectedValue(new Error('API timeout'));
 
     await expect(classify('some message')).resolves.toHaveProperty('category');
   });
 });
 ```
 
-> ⚠️ This test suite revealed a gap: the original `classifier.js` (Section 5.1) does not catch LLM exceptions — only JSON parse failures. Update `classifier.js` to wrap the entire function in try/catch.
+> ⚠️ `classifier.ts` must wrap the entire function in try/catch — not just the JSON parse — so LLM exceptions also return the safe fallback.
 
 ---
 
 ### 14.3 Context buffer — conversation history
 
-```javascript
-// tests/context.test.js
-const { getHistory, addTurn } = require('../src/ai/context');
+```typescript
+// tests/context.test.ts
+import { getHistory, addTurn } from '../src/ai/context';
 
 describe('conversation buffer', () => {
   const sender = '5563999999999';
 
-  beforeEach(() => {
-    // Clear module state between tests
-    jest.resetModules();
-  });
+  beforeEach(() => jest.resetModules());
 
   test('returns empty array for a new sender', () => {
-    const { getHistory } = require('../src/ai/context');
     expect(getHistory('unknown')).toEqual([]);
   });
 
   test('stores and retrieves turns correctly', () => {
-    const { getHistory, addTurn } = require('../src/ai/context');
     addTurn(sender, 'user', 'hello');
     addTurn(sender, 'assistant', 'hi there');
 
@@ -1272,20 +1271,17 @@ describe('conversation buffer', () => {
   });
 
   test('trims buffer to last 10 exchanges (20 turns)', () => {
-    const { getHistory, addTurn } = require('../src/ai/context');
     for (let i = 0; i < 15; i++) {
       addTurn(sender, 'user', `message ${i}`);
       addTurn(sender, 'assistant', `response ${i}`);
     }
 
     const history = getHistory(sender);
-    expect(history.length).toBe(20);  // trimmed to 10 pairs
-    // oldest messages dropped
+    expect(history.length).toBe(20);
     expect(history[0].content).toBe('message 5');
   });
 
   test('different senders have independent buffers', () => {
-    const { getHistory, addTurn } = require('../src/ai/context');
     addTurn('sender_a', 'user', 'message from A');
     addTurn('sender_b', 'user', 'message from B');
 
@@ -1302,10 +1298,9 @@ describe('conversation buffer', () => {
 
 Mock `@supabase/supabase-js` so no real network calls happen. These tests verify the query logic (filters, field names) without needing a live database.
 
-```javascript
-// tests/supabase.test.js
+```typescript
+// tests/supabase.test.ts
 
-// Mock the Supabase client before requiring the module
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockSelect = jest.fn();
@@ -1328,7 +1323,7 @@ jest.mock('@supabase/supabase-js', () => ({
   })
 }));
 
-const { saveDemand, resolveDemand, getOpenDemands } = require('../src/db/supabase');
+import { saveDemand, resolveDemand, getOpenDemands } from '../src/db/supabase';
 
 describe('saveDemand()', () => {
   test('calls insert with all required fields', async () => {
@@ -1393,12 +1388,10 @@ describe('getOpenDemands()', () => {
 
 Test the message formatting logic independently from the cron schedule and the WhatsApp client.
 
-```javascript
-// tests/briefing.test.js
-
-// Extract the formatting logic to a pure function in briefing.js:
-// export function formatBriefing(demands) { ... }
-const { formatBriefing } = require('../src/briefing');
+```typescript
+// tests/briefing.test.ts
+// formatBriefing() must be exported from src/briefing.ts for this to work
+import { formatBriefing } from '../src/briefing';
 
 describe('formatBriefing()', () => {
   test('returns a no-pending message when demands is empty', () => {
@@ -1444,11 +1437,11 @@ describe('formatBriefing()', () => {
 
 ### 14.6 Code change required: extract `formatBriefing`
 
-The `briefing.js` in Section 12.1 has the formatting logic inlined inside the cron callback. Separate it:
+The `briefing.ts` in Section 12.1 has the formatting logic inlined inside the cron callback. Separate it:
 
-```javascript
-// src/briefing.js — updated
-function formatBriefing(demands) {
+```typescript
+// src/briefing.ts — updated
+export function formatBriefing(demands: Array<{ priority: string; summary: string }>): string {
   const high = demands.filter(d => d.priority === 'high');
   const others = demands.filter(d => d.priority !== 'high');
 
@@ -1472,15 +1465,13 @@ function formatBriefing(demands) {
   return text;
 }
 
-function startBriefingSchedule(client) {
+export function startBriefingSchedule(client: Client): void {
   cron.schedule('30 6 * * 1-5', async () => {
     const demands = await getOpenDemands({ days: 1 });
     const text = formatBriefing(demands);
     await client.sendMessage(`${process.env.RT_NUMBER}@c.us`, text);
   });
 }
-
-module.exports = { startBriefingSchedule, formatBriefing };
 ```
 
 ---

@@ -4,6 +4,8 @@
 
 WhatsApp AI assistant for the Head Nurse (RT) of a hemodialysis clinic. Receives text and voice messages, classifies demands, persists them to Supabase, and sends proactive briefings. See `RT_Assistant_Development.md` for full architecture, decisions, and weekly implementation guides.
 
+**Stack:** Node.js + TypeScript, whatsapp-web.js, GLM-4.7 (dev) / Claude (prod), Supabase, Jest + ts-jest.
+
 ---
 
 ## Development Workflow
@@ -29,10 +31,13 @@ npm run test:watch  # watch mode during development
 ### Every new module needs a test file
 | New file | Test file |
 |---|---|
-| `src/ai/classifier.js` | `tests/classifier.test.js` |
-| `src/db/supabase.js` | `tests/supabase.test.js` |
-| `src/briefing.js` | `tests/briefing.test.js` |
-| `src/audio/transcribe.js` | `tests/transcribe.test.js` |
+| `src/ai/glm.ts` | `tests/glm.test.ts` |
+| `src/whatsapp/auth.ts` | `tests/auth.test.ts` |
+| `src/ai/classifier.ts` | `tests/classifier.test.ts` |
+| `src/ai/context.ts` | `tests/context.test.ts` |
+| `src/db/supabase.ts` | `tests/supabase.test.ts` |
+| `src/briefing.ts` | `tests/briefing.test.ts` |
+| `src/audio/transcribe.ts` | `tests/transcribe.test.ts` |
 
 ### What to test
 - All code paths in pure functions (happy path + error/edge cases)
@@ -40,17 +45,17 @@ npm run test:watch  # watch mode during development
 - Field names and filter logic in database queries
 
 ### What to mock
-- LLM API calls (`axios` calls in `src/ai/glm.js`) — use `jest.mock`
+- LLM API calls (`axios` calls in `src/ai/glm.ts`) — use `jest.mock('axios')`; get typed mock via `jest.mocked(axios.post)`
 - Supabase client (`@supabase/supabase-js`) — mock the chained query builder
 - WhatsApp client (`whatsapp-web.js`) — mock for unit tests; covered by manual smoke test for end-to-end
-- Whisper API (`axios` call in `src/audio/transcribe.js`) — mock
+- Whisper API (`axios` call in `src/audio/transcribe.ts`) — mock
 
 ### Follow existing patterns
 See `RT_Assistant_Development.md` Section 14 for full test examples for each module.
 
 ### Keep functions testable
 - Extract formatting/business logic into standalone exported functions before wiring them into callbacks or cron jobs
-- Example: `formatBriefing(demands)` is exported from `briefing.js` so it can be tested without a cron or WhatsApp client
+- Example: `formatBriefing(demands)` is exported from `briefing.ts` so it can be tested without a cron or WhatsApp client
 
 ---
 
@@ -74,7 +79,7 @@ git status
 git diff
 
 # 2. Stage specific files only
-git add src/ai/classifier.js tests/classifier.test.js
+git add src/ai/classifier.ts tests/classifier.test.ts
 
 # 3. Commit with a clear message
 git commit -m "add demand classifier with JSON fallback"
@@ -106,7 +111,11 @@ Never hardcode keys. All secrets live in `.env` (never committed). Template is i
 | `OPENAI_API_KEY` | Whisper API transcription |
 | `SUPABASE_URL` | Database |
 | `SUPABASE_KEY` | Database |
-| `RT_NUMBER` | Authorized WhatsApp number (no + or spaces) |
+| `RT_NUMBER` | RT's phone number — used for proactive messaging and authorization |
+| `RT_LID` | RT's WhatsApp Linked Device ID — set this if `RT_NUMBER` authorization fails (copy value from warning log) |
+| `TEAM_NUMBERS` | Comma-separated team phone numbers — restricted access (add demands only) |
+| `TEAM_LIDS` | Comma-separated team LIDs — fallback if team members trigger authorization failures |
+| `PAIRING_NUMBER` | Assistant's number — set to link via pairing code instead of QR scan |
 | `NODE_ENV` | `development` or `production` |
 
 ---
