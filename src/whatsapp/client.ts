@@ -5,6 +5,7 @@ import { getRole } from './auth';
 import { classify } from '../ai/classifier';
 import { getHistory, addTurn } from '../ai/context';
 import { saveDemand, getOpenDemands } from '../db/supabase';
+import { startBriefingSchedule } from '../briefing';
 
 async function createClient(): Promise<void> {
   const client = new Client({
@@ -34,6 +35,7 @@ async function createClient(): Promise<void> {
 
   client.on('ready', () => {
     console.log('✅ RT Assistant conectado e pronto');
+    startBriefingSchedule(client);
   });
 
   client.on('auth_failure', () => {

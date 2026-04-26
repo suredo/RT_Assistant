@@ -1,7 +1,7 @@
 # RT Assistant — Development Document
 
 > AI Assistant for the Head Nurse (RT) of a Hemodialysis Clinic  
-> Status: **In Development — Week 3** | Last updated: April 2026
+> Status: **In Development — Week 4** | Last updated: April 2026
 
 ---
 
@@ -58,8 +58,8 @@ Use **whatsapp-web.js** or **Baileys** to connect the AI to a regular WhatsApp n
 - [x] Log demands with timestamp and context (Week 2)
 - [x] Answer the RT's queries about open items (Week 2)
 - [ ] Mark demands as resolved through conversation (Week 2)
-- [ ] Generate a daily briefing at the start of each shift (Week 3)
-- [ ] List what was left pending from the previous day (Week 3)
+- [x] Generate a daily briefing at the start of each shift (Week 3)
+- [x] List what was left pending from the previous day (Week 3)
 
 **Core commands — Phase 1:**
 
@@ -555,7 +555,7 @@ The pilot will be considered successful after 30 days if:
 | 3 | Build conversation prototype (message flows) | Tech | 🔲 Pending |
 | 4 | Prepare pitch for clinic management | Business | 🔲 Pending |
 | 5 | Set up server and WhatsApp integration | Tech | ✅ Done |
-| 6 | Develop Phase 1 — MVP | Tech | 🔄 In progress (Week 3 of 4) |
+| 6 | Develop Phase 1 — MVP | Tech | 🔄 In progress (Week 4 of 4) |
 | 7 | Test with Bianca for 2 weeks | Tech + Business | 🔲 Pending |
 | 8 | Collect feedback and iterate | Tech | 🔲 Pending |
 
@@ -1018,11 +1018,11 @@ When Bianca says "resume meu dia" or similar, the LLM generates a summary of eve
 
 ### 12.3 Week 3 completion checklist
 
-- [ ] Morning briefing sent automatically at shift start
-- [ ] "Summarize my day" returns a formatted shift summary
-- [ ] "What was left from yesterday?" correctly queries the previous day
-- [ ] Briefing includes correct count of high-priority vs. other open items
-- [ ] No duplicate briefings if the server restarts mid-morning
+- [x] Morning briefing sent automatically at shift start
+- [x] "Summarize my day" returns a formatted shift summary
+- [x] "What was left from yesterday?" correctly queries the previous day
+- [x] Briefing includes correct count of high-priority vs. other open items
+- [x] No duplicate briefings if the server restarts mid-morning
 
 ---
 
