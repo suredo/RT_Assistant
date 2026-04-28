@@ -14,12 +14,14 @@ export function formatDemand(
   demand: { priority: string; summary: string; category?: string; status?: string },
   opts: FormatOptions = {}
 ): string {
-  const emoji  = PRIORITY_EMOJI[demand.priority] ?? '';
+  const resolved = opts.showStatus && demand.status === 'resolved';
+  const emoji = resolved ? '✅' : (PRIORITY_EMOJI[demand.priority] ?? '');
   let line = `${emoji} ${demand.summary}`;
 
   const extras: string[] = [];
   if (opts.showCategory && demand.category) extras.push(demand.category);
-  if (opts.showStatus   && demand.status)   extras.push(demand.status);
+  // status text is skipped when resolved — ✅ already communicates it
+  if (opts.showStatus && !resolved && demand.status) extras.push(demand.status);
   if (extras.length) line += ` (${extras.join(', ')})`;
 
   return opts.index !== undefined ? `${opts.index}. ${line}` : line;

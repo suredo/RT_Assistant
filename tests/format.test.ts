@@ -16,21 +16,32 @@ describe('formatDemand()', () => {
     expect(formatDemand(demand, { showCategory: true })).toBe('🔴 Paciente na cadeira 3 (urgência clínica)');
   });
 
-  test('appends status when showStatus is true', () => {
+  test('shows status text in parentheses for open demands', () => {
     const demand = { ...base, status: 'open' };
     expect(formatDemand(demand, { showStatus: true })).toBe('🔴 Paciente na cadeira 3 (open)');
   });
 
-  test('appends both category and status when both enabled', () => {
+  test('swaps priority emoji for ✅ when demand is resolved', () => {
+    const demand = { ...base, status: 'resolved' };
+    expect(formatDemand(demand, { showStatus: true })).toBe('✅ Paciente na cadeira 3');
+  });
+
+  test('resolved demand shows no status text — ✅ is enough', () => {
+    const demand = { ...base, category: 'urgência clínica', status: 'resolved' };
+    expect(formatDemand(demand, { showCategory: true, showStatus: true }))
+      .toBe('✅ Paciente na cadeira 3 (urgência clínica)');
+  });
+
+  test('appends both category and status text for open demands', () => {
     const demand = { ...base, category: 'urgência clínica', status: 'open' };
     expect(formatDemand(demand, { showCategory: true, showStatus: true }))
       .toBe('🔴 Paciente na cadeira 3 (urgência clínica, open)');
   });
 
-  test('index, category and status all together', () => {
-    const demand = { ...base, category: 'urgência clínica', status: 'open' };
-    expect(formatDemand(demand, { index: 1, showCategory: true, showStatus: true }))
-      .toBe('1. 🔴 Paciente na cadeira 3 (urgência clínica, open)');
+  test('index with resolved demand', () => {
+    const demand = { ...base, status: 'resolved' };
+    expect(formatDemand(demand, { index: 1, showStatus: true }))
+      .toBe('1. ✅ Paciente na cadeira 3');
   });
 
   test('falls back gracefully for unknown priority', () => {
