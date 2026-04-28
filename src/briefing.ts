@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { Client } from 'whatsapp-web.js';
 import { getOpenDemands } from './db/supabase';
+import { setLastActive } from './db/botState';
 import { formatDemand } from './format';
 
 export function formatBriefing(demands: Array<{ priority: string; summary: string }>): string {
@@ -25,6 +26,12 @@ export function formatBriefing(demands: Array<{ priority: string; summary: strin
   }
 
   return text;
+}
+
+export function startHeartbeat(): void {
+  cron.schedule('*/5 * * * *', () => {
+    setLastActive().catch(err => console.error('⚠️ Erro ao atualizar heartbeat:', err));
+  });
 }
 
 export function startBriefingSchedule(client: Client): void {

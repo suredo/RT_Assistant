@@ -10,7 +10,8 @@ import {
   PendingAction
 } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
-import { startBriefingSchedule } from '../briefing';
+import { startBriefingSchedule, startHeartbeat } from '../briefing';
+import { syncMissedDemands } from '../sync';
 import { formatDemand } from '../format';
 import puppeteer from 'puppeteer';
 
@@ -61,9 +62,11 @@ async function createClient(): Promise<void> {
     }
   });
 
-  client.on('ready', () => {
+  client.on('ready', async () => {
     console.log('✅ RT Assistant conectado e pronto');
+    await syncMissedDemands(client);
     startBriefingSchedule(client);
+    startHeartbeat();
   });
 
   client.on('auth_failure', () => {

@@ -40,6 +40,8 @@ npm run test:watch  # watch mode during development
 | `src/briefing.ts` | `tests/briefing.test.ts` |
 | `src/format.ts` | `tests/format.test.ts` |
 | `src/audio/transcribe.ts` | `tests/transcribe.test.ts` |
+| `src/db/botState.ts` | `tests/botState.test.ts` |
+| `src/sync.ts` | `tests/sync.test.ts` |
 
 ### What to test
 - All code paths in pure functions (happy path + error/edge cases)

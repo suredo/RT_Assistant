@@ -46,6 +46,18 @@ export async function resolveDemand(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function findDemandByMessage(message: string): Promise<Demand | null> {
+  const { data, error } = await supabase
+    .from('demands')
+    .select('*')
+    .eq('message', message)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  if (error) return null;
+  return data;
+}
+
 export async function getOpenDemands({ days = 7, priority }: { days?: number; priority?: string } = {}): Promise<Demand[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = supabase

@@ -4,6 +4,8 @@ const mockFromSelect = jest.fn();
 const mockEq = jest.fn();
 const mockGte = jest.fn();
 const mockOrder = jest.fn();
+const mockLimit = jest.fn();
+const mockSingle = jest.fn();
 
 jest.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
@@ -14,11 +16,13 @@ jest.mock('@supabase/supabase-js', () => ({
       eq: mockEq,
       gte: mockGte,
       order: mockOrder,
+      limit: mockLimit,
+      single: mockSingle,
     })
   })
 }));
 
-import { saveDemand, updateDemand, resolveDemand, getOpenDemands } from '../src/db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands, findDemandByMessage } from '../src/db/supabase';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -122,5 +126,33 @@ describe('getOpenDemands()', () => {
     const result = await getOpenDemands();
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('findDemandByMessage()', () => {
+  test('returns the demand when found', async () => {
+    const demand = { id: 'abc', message: 'paciente caiu', summary: 'Queda', category: 'urgência clínica', priority: 'high' };
+    mockFromSelect.mockReturnValue({ eq: mockEq });
+    mockEq.mockReturnValue({ order: mockOrder });
+    mockOrder.mockReturnValue({ limit: mockLimit });
+    mockLimit.mockReturnValue({ single: mockSingle });
+    mockSingle.mockResolvedValue({ data: demand, error: null });
+
+    const result = await findDemandByMessage('paciente caiu');
+
+    expect(result).toEqual(demand);
+    expect(mockEq).toHaveBeenCalledWith('message', 'paciente caiu');
+  });
+
+  test('returns null when not found', async () => {
+    mockFromSelect.mockReturnValue({ eq: mockEq });
+    mockEq.mockReturnValue({ order: mockOrder });
+    mockOrder.mockReturnValue({ limit: mockLimit });
+    mockLimit.mockReturnValue({ single: mockSingle });
+    mockSingle.mockResolvedValue({ data: null, error: new Error('not found') });
+
+    const result = await findDemandByMessage('mensagem inexistente');
+
+    expect(result).toBeNull();
   });
 });
