@@ -97,98 +97,107 @@ async function createClient(): Promise<void> {
     console.log(`\n📩 [${new Date().toLocaleTimeString()}] [${role}] ${senderNumber}: ${msg.body}`);
 
     const msgChat = await msg.getChat();
-    await msgChat.sendStateTyping();
 
-    // ── Check for a pending confirmation ─────────────────────────────────────
-    const pending = getPendingAction(senderNumber);
-    if (pending) {
-      if (isConfirmation(msg.body)) {
-        try {
-          await executePendingAction(pending);
-          clearPendingAction(senderNumber);
-          clearHistory(senderNumber);
-          await msg.reply('✅ Feito!');
-        } catch (err) {
-          console.error('⚠️ Erro ao executar ação pendente:', err);
-          clearPendingAction(senderNumber);
-          await msg.reply('⚠️ Erro ao executar a ação. Tente novamente.');
+    // Refresh the typing indicator every 5 s — WhatsApp hides it after ~10 s,
+    // so without this it disappears while the bot is fetching data or waiting
+    // for the LLM. try/finally guarantees cleanup on every exit path.
+    msgChat.sendStateTyping();
+    const typingInterval = setInterval(() => msgChat.sendStateTyping(), 5000);
+
+    try {
+      // ── Check for a pending confirmation ───────────────────────────────────
+      const pending = getPendingAction(senderNumber);
+      if (pending) {
+        if (isConfirmation(msg.body)) {
+          try {
+            await executePendingAction(pending);
+            clearPendingAction(senderNumber);
+            clearHistory(senderNumber);
+            await msg.reply('✅ Feito!');
+          } catch (err) {
+            console.error('⚠️ Erro ao executar ação pendente:', err);
+            clearPendingAction(senderNumber);
+            await msg.reply('⚠️ Erro ao executar a ação. Tente novamente.');
+          }
+          return;
         }
-        return;
-      }
-      if (isRejection(msg.body)) {
+        if (isRejection(msg.body)) {
+          clearPendingAction(senderNumber);
+          await msg.reply('Cancelado. Como posso ajudar?');
+          return;
+        }
+        // Unrelated message — clear pending and process normally
         clearPendingAction(senderNumber);
-        await msg.reply('Cancelado. Como posso ajudar?');
-        return;
       }
-      // Unrelated message — clear pending and process normally
-      clearPendingAction(senderNumber);
-    }
 
-    // ── Fetch open demands (RT only) ─────────────────────────────────────────
-    let openDemands: Demand[] = [];
-    if (role === 'rt') {
-      try {
-        openDemands = await getOpenDemands({ days: 7 });
-      } catch (err) {
-        console.error('⚠️ Erro ao buscar demandas:', err);
+      // ── Fetch open demands (RT only) ───────────────────────────────────────
+      let openDemands: Demand[] = [];
+      if (role === 'rt') {
+        try {
+          openDemands = await getOpenDemands({ days: 7 });
+        } catch (err) {
+          console.error('⚠️ Erro ao buscar demandas:', err);
+        }
       }
-    }
 
-    // ── Classify ─────────────────────────────────────────────────────────────
-    const classification = await classify(msg.body);
+      // ── Classify ───────────────────────────────────────────────────────────
+      const classification = await classify(msg.body);
 
-    // ── Stage write actions — ask for confirmation instead of writing directly ─
-    if (classification.type === 'new_demand') {
-      const action: PendingAction = {
-        type: 'save',
-        demand: {
-          message: msg.body,
-          summary: classification.summary,
-          category: classification.category,
-          priority: classification.priority
-        }
-      };
-      setPendingAction(senderNumber, action);
-      await msg.reply(confirmationPrompt(action));
-      return;
-    }
-
-    if (classification.type === 'update' && classification.demandIndex !== null) {
-      const target = openDemands[classification.demandIndex - 1];
-      if (target?.id) {
-        let action: PendingAction;
-        if (classification.resolved) {
-          action = { type: 'resolve', demandId: target.id, demandPriority: target.priority, demandSummary: target.summary };
-        } else {
-          const mergedSummary = await mergeSummary(target.summary, msg.body);
-          action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
-        }
+      // ── Stage write actions — ask for confirmation instead of writing directly
+      if (classification.type === 'new_demand') {
+        const action: PendingAction = {
+          type: 'save',
+          demand: {
+            message: msg.body,
+            summary: classification.summary,
+            category: classification.category,
+            priority: classification.priority
+          }
+        };
         setPendingAction(senderNumber, action);
         await msg.reply(confirmationPrompt(action));
         return;
       }
+
+      if (classification.type === 'update' && classification.demandIndex !== null) {
+        const target = openDemands[classification.demandIndex - 1];
+        if (target?.id) {
+          let action: PendingAction;
+          if (classification.resolved) {
+            action = { type: 'resolve', demandId: target.id, demandPriority: target.priority, demandSummary: target.summary };
+          } else {
+            const mergedSummary = await mergeSummary(target.summary, msg.body);
+            action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
+          }
+          setPendingAction(senderNumber, action);
+          await msg.reply(confirmationPrompt(action));
+          return;
+        }
+      }
+
+      // ── LLM reply for queries and unmatched messages ───────────────────────
+      // Clear history before a query so the answer comes from the DB-injected
+      // system prompt, not from stale conversation context.
+      if (classification.type === 'query') clearHistory(senderNumber);
+
+      let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+      if (role === 'rt' && openDemands.length) {
+        const demandList = openDemands
+          .map((d, i) => formatDemand(d, { index: i + 1 }))
+          .join('\n');
+        systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
+      }
+
+      const history = getHistory(senderNumber);
+      const response = await reply(msg.body, history, systemPrompt);
+      addTurn(senderNumber, 'user', msg.body);
+      addTurn(senderNumber, 'assistant', response);
+
+      console.log(`🤖 Resposta: ${response}\n`);
+      await msg.reply(response);
+    } finally {
+      clearInterval(typingInterval);
     }
-
-    // ── LLM reply for queries and unmatched messages ──────────────────────────
-    // Clear history before a query so the answer comes from the DB-injected
-    // system prompt, not from stale conversation context.
-    if (classification.type === 'query') clearHistory(senderNumber);
-
-    let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-    if (role === 'rt' && openDemands.length) {
-      const demandList = openDemands
-        .map((d, i) => formatDemand(d, { index: i + 1 }))
-        .join('\n');
-      systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
-    }
-
-    const history = getHistory(senderNumber);
-    const response = await reply(msg.body, history, systemPrompt);
-    addTurn(senderNumber, 'user', msg.body);
-    addTurn(senderNumber, 'assistant', response);
-
-    console.log(`🤖 Resposta: ${response}\n`);
-    await msg.reply(response);
   });
 
   // Wrap initialize() so a ProtocolError from a still-locked Chrome user data
