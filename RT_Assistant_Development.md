@@ -531,7 +531,7 @@ Patient names and dates of birth **are already sensitive personal data under LGP
 | Management not approving | Medium | Pitch focused on ANVISA compliance and traceability, not AI |
 | AI misclassifying a demand | Medium | Bianca can correct via conversation; use corrections to improve |
 | Sensitive patient data | High attention | Name + DOB are sensitive under LGPD; apply encryption, retention policy, and ZDR per section 6.1 |
-| WhatsApp session lost on cloud restart | Medium | Use Railway with a persistent volume; document the QR re-scan recovery procedure |
+| WhatsApp session lost on cloud restart | Medium | Chat-history sync on restart (see Section 14) recovers missed demands automatically — at most 5 minutes of uncertainty (heartbeat interval) |
 
 ---
 
@@ -1503,6 +1503,63 @@ Run this checklist against the live bot before shipping any feature:
 | WhatsApp connection and QR scan | Requires a live phone and WhatsApp session — can't automate |
 | Whisper transcription accuracy | Third-party service; test only that the API call is constructed correctly |
 | Full message flow end-to-end | Covered by the manual smoke test checklist |
+
+---
+
+---
+
+## 15. Crash-Recovery Sync
+
+### Overview
+
+When the bot process restarts (crash, redeploy, or manual restart), any messages Bianca sent during the downtime are replayed from WhatsApp chat history. This prevents demands from being silently lost.
+
+### How it works
+
+| Component | File | Role |
+|---|---|---|
+| `bot_state` Supabase table | — | Single-row store for `last_active_at` timestamp |
+| `getLastActive` / `setLastActive` | `src/db/botState.ts` | Read and write the watermark |
+| `syncMissedDemands(client)` | `src/sync.ts` | Runs on `ready` — replays missed demands |
+| `startHeartbeat()` | `src/briefing.ts` | Cron every 5 min — keeps watermark current |
+
+### Sync flow
+
+1. On `ready`, read `last_active_at` from Supabase → get Unix watermark
+2. `getChatById(RT_LID@lid or RT_NUMBER@c.us)` → fetch up to 100 messages
+3. Filter: `timestamp > watermark AND !fromMe AND type === 'chat'`
+4. For each missed message: `classify()` → if `new_demand`, check `findDemandByMessage()` (dedup), then `saveDemand()` directly (no confirmation prompt in catch-up mode)
+5. `setLastActive()` → update watermark to now
+6. If any demands saved, send Bianca: `"🔄 Sincronizei N demanda(s) registrada(s) enquanto estava offline."`
+
+### Supabase table (run once)
+
+```sql
+CREATE TABLE bot_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO bot_state (key, value) VALUES ('last_active_at', now()::text);
+```
+
+### Known edge case — message received during sync
+
+**Scenario:** Bianca sends a message while `syncMissedDemands` is still running (the `ready` event and `message` event are independent and run concurrently).
+
+**What happens:**
+- The live `message` handler fires normally and stages the demand for confirmation
+- Sync also sees the message (its timestamp > watermark) and may classify and save it directly — bypassing the confirmation flow
+- The dedup guard (`findDemandByMessage`) reduces the risk of a duplicate, but since both paths run concurrently there is a small race window where both could read "no duplicate" before either writes
+
+**Observable symptoms if it triggers:**
+- Bianca sees a confirmation prompt for a demand that is already in the DB
+- If she confirms, a second identical demand is saved
+- Or sync saves it silently and the confirmation prompt is for nothing
+
+**Why it's acceptable for now:** The window is only as long as sync takes (a few seconds), and it requires Bianca to send a message in that exact gap right after the bot reconnects. Adding a mutex would complicate the code significantly for a very low-probability event.
+
+**If a duplicate is found:** check Supabase for two rows with the same `message` text and close timestamps — delete the extra one manually.
 
 ---
 
