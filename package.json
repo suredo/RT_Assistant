@@ -12,7 +12,8 @@
   },
   "jest": {
     "preset": "ts-jest",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "testPathIgnorePatterns": ["/node_modules/", "/dist/"]
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

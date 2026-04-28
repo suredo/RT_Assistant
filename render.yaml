@@ -1,0 +1,27 @@
+services:
+  - type: worker
+    name: rt-assistant
+    env: node
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GLM_API_KEY
+        sync: false
+      - key: GLM_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: RT_NUMBER
+        sync: false
+      - key: RT_LID
+        sync: false
+      - key: TEAM_NUMBERS
+        sync: false
+      - key: TEAM_LIDS
+        sync: false
+      - key: PAIRING_NUMBER
+        sync: false

@@ -12,6 +12,7 @@ import {
 import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule } from '../briefing';
 import { formatDemand } from '../format';
+import puppeteer from 'puppeteer';
 
 function confirmationPrompt(action: PendingAction): string {
   if (action.type === 'save') {
@@ -38,7 +39,8 @@ async function createClient(): Promise<void> {
     authStrategy: new LocalAuth(),
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH ?? puppeteer.executablePath(),
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     }
   });
 
