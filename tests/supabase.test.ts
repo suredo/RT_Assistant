@@ -22,7 +22,7 @@ jest.mock('@supabase/supabase-js', () => ({
   })
 }));
 
-import { saveDemand, updateDemand, resolveDemand, getOpenDemands, findDemandByMessage } from '../src/db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands, getDemands, findDemandByMessage } from '../src/db/supabase';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -92,24 +92,84 @@ describe('resolveDemand()', () => {
   });
 });
 
+// getDemands chain: select → gte → [eq(status)] → [eq(category)] → [eq(priority)] → order
+describe('getDemands()', () => {
+  test('fetches all statuses when no status filter given', async () => {
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ order: mockOrder });
+    mockOrder.mockResolvedValue({ data: [], error: null });
+
+    await getDemands({ days: 7 });
+
+    expect(mockGte).toHaveBeenCalledWith('created_at', expect.any(String));
+    expect(mockEq).not.toHaveBeenCalled();
+  });
+
+  test('filters by status=resolved', async () => {
+    const mockStatusEq = jest.fn().mockReturnValue({ order: mockOrder });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
+    mockOrder.mockResolvedValue({ data: [], error: null });
+
+    await getDemands({ status: 'resolved', days: 30 });
+
+    expect(mockStatusEq).toHaveBeenCalledWith('status', 'resolved');
+  });
+
+  test('filters by status and category', async () => {
+    const mockCategoryEq = jest.fn().mockReturnValue({ order: mockOrder });
+    const mockStatusEq = jest.fn().mockReturnValue({ eq: mockCategoryEq });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
+    mockOrder.mockResolvedValue({ data: [], error: null });
+
+    await getDemands({ status: 'open', category: 'urgência clínica' });
+
+    expect(mockStatusEq).toHaveBeenCalledWith('status', 'open');
+    expect(mockCategoryEq).toHaveBeenCalledWith('category', 'urgência clínica');
+  });
+
+  test('filters by status and priority', async () => {
+    const mockPriorityEq = jest.fn().mockReturnValue({ order: mockOrder });
+    const mockStatusEq = jest.fn().mockReturnValue({ eq: mockPriorityEq });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
+    mockOrder.mockResolvedValue({ data: [], error: null });
+
+    await getDemands({ status: 'open', priority: 'high' });
+
+    expect(mockPriorityEq).toHaveBeenCalledWith('priority', 'high');
+  });
+
+  test('returns empty array when data is null', async () => {
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ order: mockOrder });
+    mockOrder.mockResolvedValue({ data: null, error: null });
+
+    const result = await getDemands();
+
+    expect(result).toEqual([]);
+  });
+});
+
 describe('getOpenDemands()', () => {
   test('filters by status=open and date range', async () => {
-    mockFromSelect.mockReturnValue({ eq: mockEq });
-    mockEq.mockReturnValue({ gte: mockGte });
-    mockGte.mockReturnValue({ order: mockOrder });
+    const mockStatusEq = jest.fn().mockReturnValue({ order: mockOrder });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
     mockOrder.mockResolvedValue({ data: [], error: null });
 
     await getOpenDemands({ days: 7 });
 
-    expect(mockEq).toHaveBeenCalledWith('status', 'open');
+    expect(mockStatusEq).toHaveBeenCalledWith('status', 'open');
     expect(mockGte).toHaveBeenCalledWith('created_at', expect.any(String));
   });
 
   test('adds priority filter when provided', async () => {
     const mockPriorityEq = jest.fn().mockReturnValue({ order: mockOrder });
-    mockFromSelect.mockReturnValue({ eq: mockEq });
-    mockEq.mockReturnValue({ gte: mockGte });
-    mockGte.mockReturnValue({ eq: mockPriorityEq });
+    const mockStatusEq = jest.fn().mockReturnValue({ eq: mockPriorityEq });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
     mockOrder.mockResolvedValue({ data: [], error: null });
 
     await getOpenDemands({ days: 7, priority: 'high' });
@@ -118,9 +178,9 @@ describe('getOpenDemands()', () => {
   });
 
   test('returns empty array when data is null', async () => {
-    mockFromSelect.mockReturnValue({ eq: mockEq });
-    mockEq.mockReturnValue({ gte: mockGte });
-    mockGte.mockReturnValue({ order: mockOrder });
+    const mockStatusEq = jest.fn().mockReturnValue({ order: mockOrder });
+    mockFromSelect.mockReturnValue({ gte: mockGte });
+    mockGte.mockReturnValue({ eq: mockStatusEq });
     mockOrder.mockResolvedValue({ data: null, error: null });
 
     const result = await getOpenDemands();

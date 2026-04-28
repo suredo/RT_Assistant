@@ -58,17 +58,29 @@ export async function findDemandByMessage(message: string): Promise<Demand | nul
   return data;
 }
 
-export async function getOpenDemands({ days = 7, priority }: { days?: number; priority?: string } = {}): Promise<Demand[]> {
+export interface DemandFilters {
+  status?: 'open' | 'resolved';  // undefined = no status filter (all statuses)
+  category?: string;
+  priority?: string;
+  days?: number;
+}
+
+export async function getDemands({ status, category, priority, days = 7 }: DemandFilters = {}): Promise<Demand[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = supabase
     .from('demands')
     .select('*')
-    .eq('status', 'open')
     .gte('created_at', new Date(Date.now() - days * 86400000).toISOString());
 
+  if (status) query = query.eq('status', status);
+  if (category) query = query.eq('category', category);
   if (priority) query = query.eq('priority', priority);
 
   const { data, error } = await query.order('created_at', { ascending: true });
   if (error) throw error;
   return data ?? [];
+}
+
+export async function getOpenDemands({ days = 7, priority }: { days?: number; priority?: string } = {}): Promise<Demand[]> {
+  return getDemands({ status: 'open', priority, days });
 }

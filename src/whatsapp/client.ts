@@ -9,7 +9,7 @@ import {
   isConfirmation, isRejection,
   PendingAction
 } from '../ai/context';
-import { saveDemand, updateDemand, resolveDemand, getOpenDemands, Demand } from '../db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
 import { formatDemand } from '../format';
@@ -181,11 +181,41 @@ async function createClient(): Promise<void> {
       if (classification.type === 'query') clearHistory(senderNumber);
 
       let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-      if (role === 'rt' && openDemands.length) {
-        const demandList = openDemands
-          .map((d, i) => formatDemand(d, { index: i + 1 }))
-          .join('\n');
-        systemPrompt += `\n\n## Demandas em aberto (últimos 7 dias):\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
+      if (role === 'rt') {
+        // For queries with explicit filters, fetch exactly what was asked for.
+        // For everything else (updates, new demands, etc.) use the open demands
+        // already fetched — they are what the index references point to.
+        let demandsForContext = openDemands;
+        let sectionLabel = 'Demandas em aberto (últimos 7 dias)';
+        let showStatus = false;
+
+        const qf = classification.type === 'query' ? classification.queryFilters : null;
+        if (qf) {
+          const days = qf.status === 'open' ? 7 : 30;
+          try {
+            demandsForContext = await getDemands({
+              status: qf.status === 'all' ? undefined : qf.status,
+              category: qf.category ?? undefined,
+              priority: qf.priority ?? undefined,
+              days
+            });
+          } catch (err) {
+            console.error('⚠️ Erro ao buscar demandas filtradas:', err);
+          }
+          showStatus = qf.status !== 'open';
+          sectionLabel = qf.status === 'resolved' ? `Demandas resolvidas (últimos ${days} dias)`
+                       : qf.status === 'all'      ? `Todas as demandas (últimos ${days} dias)`
+                       : 'Demandas em aberto (últimos 7 dias)';
+          if (qf.category) sectionLabel += ` — ${qf.category}`;
+          if (qf.priority)  sectionLabel += ` — prioridade ${qf.priority}`;
+        }
+
+        if (demandsForContext.length) {
+          const demandList = demandsForContext
+            .map((d, i) => formatDemand(d, { index: i + 1, showStatus }))
+            .join('\n');
+          systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
+        }
       }
 
       const history = getHistory(senderNumber);

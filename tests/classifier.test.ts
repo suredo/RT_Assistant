@@ -126,6 +126,65 @@ describe('classify()', () => {
 
     expect(result.demandIndex).toBeNull();
   });
+
+  test('extracts queryFilters for a resolved demand query', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'query', category: 'rotina', priority: 'low', summary: 'Consulta de resolvidas',
+      demandIndex: null, resolved: false,
+      queryFilters: { status: 'resolved', category: null, priority: null }
+    }));
+
+    const result = await classify('quais demandas foram resolvidas?');
+
+    expect(result.queryFilters).toEqual({ status: 'resolved', category: null, priority: null });
+  });
+
+  test('extracts queryFilters with category and priority filters', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'query', category: 'urgência clínica', priority: 'high', summary: 'Consulta filtrada',
+      demandIndex: null, resolved: false,
+      queryFilters: { status: 'open', category: 'urgência clínica', priority: 'high' }
+    }));
+
+    const result = await classify('demandas urgentes de urgência clínica');
+
+    expect(result.queryFilters).toEqual({ status: 'open', category: 'urgência clínica', priority: 'high' });
+  });
+
+  test('extracts queryFilters with status=all', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'query', category: 'rotina', priority: 'low', summary: 'Todas demandas',
+      demandIndex: null, resolved: false,
+      queryFilters: { status: 'all', category: null, priority: null }
+    }));
+
+    const result = await classify('me mostra todas as demandas');
+
+    expect(result.queryFilters?.status).toBe('all');
+  });
+
+  test('sets queryFilters to null for non-query types', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'new_demand', category: 'rotina', priority: 'low', summary: 'Nova demanda',
+      demandIndex: null, resolved: false, queryFilters: null
+    }));
+
+    const result = await classify('falta papel na impressora');
+
+    expect(result.queryFilters).toBeNull();
+  });
+
+  test('defaults queryFilters.status to open when LLM omits it', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'query', category: 'rotina', priority: 'low', summary: 'Consulta',
+      demandIndex: null, resolved: false,
+      queryFilters: { category: null, priority: null }
+    }));
+
+    const result = await classify('o que está pendente?');
+
+    expect(result.queryFilters?.status).toBe('open');
+  });
 });
 
 describe('mergeSummary()', () => {
