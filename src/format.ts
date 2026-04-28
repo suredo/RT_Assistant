@@ -20,8 +20,7 @@ export function formatDemand(
 
   const extras: string[] = [];
   if (opts.showCategory && demand.category) extras.push(demand.category);
-  // status text is skipped when resolved — ✅ already communicates it
-  if (opts.showStatus && !resolved && demand.status) extras.push(demand.status);
+  // priority emoji already signals open — only ✅ needs an explicit marker
   if (extras.length) line += ` (${extras.join(', ')})`;
 
   return opts.index !== undefined ? `${opts.index}. ${line}` : line;

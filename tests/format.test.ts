@@ -16,9 +16,9 @@ describe('formatDemand()', () => {
     expect(formatDemand(demand, { showCategory: true })).toBe('🔴 Paciente na cadeira 3 (urgência clínica)');
   });
 
-  test('shows status text in parentheses for open demands', () => {
+  test('shows no status text for open demands — priority emoji is enough', () => {
     const demand = { ...base, status: 'open' };
-    expect(formatDemand(demand, { showStatus: true })).toBe('🔴 Paciente na cadeira 3 (open)');
+    expect(formatDemand(demand, { showStatus: true })).toBe('🔴 Paciente na cadeira 3');
   });
 
   test('swaps priority emoji for ✅ when demand is resolved', () => {
@@ -32,10 +32,10 @@ describe('formatDemand()', () => {
       .toBe('✅ Paciente na cadeira 3 (urgência clínica)');
   });
 
-  test('appends both category and status text for open demands', () => {
+  test('shows category but no status text for open demands', () => {
     const demand = { ...base, category: 'urgência clínica', status: 'open' };
     expect(formatDemand(demand, { showCategory: true, showStatus: true }))
-      .toBe('🔴 Paciente na cadeira 3 (urgência clínica, open)');
+      .toBe('🔴 Paciente na cadeira 3 (urgência clínica)');
   });
 
   test('index with resolved demand', () => {
