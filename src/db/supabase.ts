@@ -68,7 +68,7 @@ export async function getOpenDemands({ days = 7, priority }: { days?: number; pr
 
   if (priority) query = query.eq('priority', priority);
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data, error } = await query.order('created_at', { ascending: true });
   if (error) throw error;
   return data ?? [];
 }
