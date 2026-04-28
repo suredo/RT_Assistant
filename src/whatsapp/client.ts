@@ -64,6 +64,9 @@ async function createClient(): Promise<void> {
 
   client.on('ready', async () => {
     console.log('✅ RT Assistant conectado e pronto');
+    // WhatsApp Web's contact/LID store takes a few seconds to finish loading
+    // after the ready event — without this delay getChatById throws "No LID".
+    await new Promise(resolve => setTimeout(resolve, 8000));
     await syncMissedDemands(client);
     startBriefingSchedule(client);
     startHeartbeat();
