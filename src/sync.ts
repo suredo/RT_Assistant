@@ -7,7 +7,10 @@ export async function syncMissedDemands(client: Client): Promise<number> {
   const lastActive = await getLastActive();
   const lastActiveUnix = Math.floor(lastActive.getTime() / 1000);
 
-  const rtChatId = `${process.env.RT_NUMBER}@c.us`;
+  // Prefer LID-based chat ID when RT_LID is set — @c.us lookup throws
+  // "No LID for user" on accounts where WhatsApp uses LIDs internally.
+  const rtLid = process.env.RT_LID?.trim();
+  const rtChatId = rtLid ? `${rtLid}@lid` : `${process.env.RT_NUMBER}@c.us`;
   let chat;
   try {
     chat = await client.getChatById(rtChatId);
