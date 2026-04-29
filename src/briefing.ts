@@ -3,6 +3,7 @@ import { Client } from 'whatsapp-web.js';
 import { getOpenDemands } from './db/supabase';
 import { setLastActive } from './db/botState';
 import { formatDemand } from './format';
+import { getRtNumbers } from './whatsapp/auth';
 
 export function formatBriefing(demands: Array<{ priority: string; summary: string }>): string {
   const high = demands.filter(d => d.priority === 'high');
@@ -40,8 +41,11 @@ export function startBriefingSchedule(client: Client): void {
     try {
       const demands = await getOpenDemands({ days: 1 });
       const text = formatBriefing(demands);
-      await client.sendMessage(`${process.env.RT_NUMBER}@c.us`, text);
-      console.log('☀️ Briefing enviado para a RT');
+      const rtNumbers = getRtNumbers();
+      await Promise.all(
+        rtNumbers.map(n => client.sendMessage(`${n}@c.us`, text))
+      );
+      console.log(`☀️ Briefing enviado para ${rtNumbers.length} RT(s)`);
     } catch (err) {
       console.error('⚠️ Erro ao enviar briefing:', err);
     }

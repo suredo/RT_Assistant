@@ -69,4 +69,18 @@ describe('getRole()', () => {
     process.env.TEAM_NUMBERS = `${RT}, ${TEAM_A}`;
     expect(getRole(asCus(RT))).toBe('rt');
   });
+
+  test('returns "rt" for any number in a comma-separated RT_NUMBER list', () => {
+    const RT2 = '5563888880000';
+    process.env.RT_NUMBER = `${RT}, ${RT2}`;
+    expect(getRole(asCus(RT))).toBe('rt');
+    expect(getRole(asCus(RT2))).toBe('rt');
+  });
+
+  test('returns "rt" for any LID in a comma-separated RT_LID list', () => {
+    const RT_LID2 = '999888777666555';
+    process.env.RT_LID = `${RT_LID}, ${RT_LID2}`;
+    expect(getRole(asLid(RT_LID))).toBe('rt');
+    expect(getRole(asLid(RT_LID2))).toBe('rt');
+  });
 });
