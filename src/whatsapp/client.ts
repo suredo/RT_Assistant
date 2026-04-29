@@ -182,6 +182,8 @@ async function createClient(): Promise<void> {
       if (classification.type === 'query') clearHistory(senderNumber);
 
       let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+      let quotedMessageId: string | null = null;
+
       if (role === 'rt') {
         // For queries with explicit filters, fetch exactly what was asked for.
         // For everything else (updates, new demands, etc.) use the open demands
@@ -217,12 +219,15 @@ async function createClient(): Promise<void> {
             .join('\n');
           systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
 
-          // When asking about a specific demand, include the original message
-          // text so the bot can cite exactly what was said when it was created.
+          // When asking about a specific demand by index, include the original
+          // message text for context and capture its ID for a quoted reply.
           if (classification.demandIndex !== null) {
             const target = demandsForContext[classification.demandIndex - 1];
             if (target?.message) {
               systemPrompt += `\n\nMensagem original da demanda ${classification.demandIndex}: "${target.message}"`;
+            }
+            if (target?.whatsapp_message_id) {
+              quotedMessageId = target.whatsapp_message_id;
             }
           }
         }
@@ -234,7 +239,11 @@ async function createClient(): Promise<void> {
       addTurn(senderNumber, 'assistant', response);
 
       console.log(`🤖 Resposta: ${response}\n`);
-      await msg.reply(response);
+      if (quotedMessageId) {
+        await client.sendMessage(msgChat.id._serialized, response, { quotedMessageId });
+      } else {
+        await msg.reply(response);
+      }
     } finally {
       clearInterval(typingInterval);
     }

@@ -1563,4 +1563,37 @@ INSERT INTO bot_state (key, value) VALUES ('last_active_at', now()::text);
 
 ---
 
+## 16. Message Traceability — Linking Demands to Original WhatsApp Messages
+
+### Overview
+
+Every demand stores the `whatsapp_message_id` (`msg.id._serialized`) of the WhatsApp message that originated it. This enables two things:
+
+1. **Original message context in queries** — when Bianca asks about a specific demand by index, the original message text is injected into the system prompt so the bot can cite exactly what was said.
+2. **Quoted reply** — the bot's response is sent as a WhatsApp quoted reply pointing back to the original message bubble, making it easy to scroll back and find the full context.
+
+### Supabase migration (run once)
+
+```sql
+ALTER TABLE demands ADD COLUMN whatsapp_message_id TEXT;
+```
+
+### How it works
+
+| Step | Where | What happens |
+|---|---|---|
+| Demand staged | `src/whatsapp/client.ts` | `msg.id._serialized` is stored in the `save` PendingAction |
+| Demand confirmed | `executePendingAction` | `whatsapp_message_id` written to DB via `saveDemand()` |
+| Sync replay | `src/sync.ts` | `msg.id._serialized` also written for demands recovered on restart |
+| Query by index | `src/whatsapp/client.ts` | Original message text injected into system prompt; `whatsapp_message_id` captured |
+| Response sent | `src/whatsapp/client.ts` | If `quotedMessageId` captured, uses `client.sendMessage(..., { quotedMessageId })` instead of `msg.reply()` |
+
+### Behaviour
+
+- Only triggers for queries that reference a specific demand by number (e.g. "me fala mais sobre a demanda 3")
+- If the original message is too old for WhatsApp to render a preview, the message still sends normally — no error
+- Demands created before this feature was added have `whatsapp_message_id = NULL` and fall back to `msg.reply()` silently
+
+---
+
 *Living document — update as decisions are made.*
