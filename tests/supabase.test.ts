@@ -22,7 +22,7 @@ jest.mock('@supabase/supabase-js', () => ({
   })
 }));
 
-import { saveDemand, updateDemand, resolveDemand, getOpenDemands, getDemands, findDemandByMessage } from '../src/db/supabase';
+import { saveDemand, updateDemand, resolveDemand, getOpenDemands, getDemands, findDemandByMessage, appendNote } from '../src/db/supabase';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -93,6 +93,36 @@ describe('updateDemand()', () => {
     mockUpdate.mockReturnValue({ eq: mockUpdateEq });
 
     await expect(updateDemand('abc-123', { priority: 'low' })).rejects.toThrow('Update failed');
+  });
+});
+
+describe('appendNote()', () => {
+  test('writes combined notes when demand already has notes', async () => {
+    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+    await appendNote('abc-123', '[29/04 10:00] Nota anterior', '[29/04 14:32] Nova nota');
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      notes: '[29/04 10:00] Nota anterior\n[29/04 14:32] Nova nota'
+    });
+    expect(mockUpdateEq).toHaveBeenCalledWith('id', 'abc-123');
+  });
+
+  test('writes only the new note when demand has no existing notes', async () => {
+    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+    await appendNote('abc-123', undefined, '[29/04 14:32] Primeira nota');
+
+    expect(mockUpdate).toHaveBeenCalledWith({ notes: '[29/04 14:32] Primeira nota' });
+  });
+
+  test('throws when Supabase returns an error', async () => {
+    const mockUpdateEq = jest.fn().mockResolvedValue({ error: new Error('Update failed') });
+    mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+    await expect(appendNote('abc-123', undefined, 'nota')).rejects.toThrow('Update failed');
   });
 });
 

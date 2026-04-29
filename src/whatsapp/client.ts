@@ -9,11 +9,17 @@ import {
   isConfirmation, isRejection,
   PendingAction
 } from '../ai/context';
-import { saveDemand, updateDemand, resolveDemand, getOpenDemands, getDemands, Demand } from '../db/supabase';
+import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
 import { formatDemand } from '../format';
 import puppeteer from 'puppeteer';
+
+function noteTimestamp(): string {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `[${pad(now.getDate())}/${pad(now.getMonth() + 1)} ${pad(now.getHours())}:${pad(now.getMinutes())}]`;
+}
 
 function confirmationPrompt(action: PendingAction): string {
   if (action.type === 'save') {
@@ -21,6 +27,9 @@ function confirmationPrompt(action: PendingAction): string {
   }
   if (action.type === 'update') {
     return `✏️ Vou atualizar a demanda:\n${formatDemand(action.fields)}\n\nConfirma? (sim/não)`;
+  }
+  if (action.type === 'add_note') {
+    return `📝 Vou adicionar esta nota à demanda "${action.demandSummary}":\n${action.formattedNote}\n\nConfirma? (sim/não)`;
   }
   return `✅ Vou marcar como resolvida:\n${formatDemand({ priority: action.demandPriority, summary: action.demandSummary })}\n\nConfirma? (sim/não)`;
 }
@@ -30,6 +39,8 @@ async function executePendingAction(action: PendingAction): Promise<void> {
     await saveDemand({ ...action.demand, whatsapp_message_id: action.messageId });
   } else if (action.type === 'update') {
     await updateDemand(action.demandId, action.fields);
+  } else if (action.type === 'add_note') {
+    await appendNote(action.demandId, action.existingNotes, action.formattedNote);
   } else {
     await resolveDemand(action.demandId);
   }
@@ -170,6 +181,23 @@ async function createClient(): Promise<void> {
             const mergedSummary = await mergeSummary(target.summary, msg.body);
             action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
           }
+          setPendingAction(senderNumber, action);
+          await msg.reply(confirmationPrompt(action));
+          return;
+        }
+      }
+
+      if (classification.type === 'add_note' && classification.demandIndex !== null && classification.note) {
+        const target = openDemands[classification.demandIndex - 1];
+        if (target?.id) {
+          const formattedNote = `${noteTimestamp()} ${classification.note}`;
+          const action: PendingAction = {
+            type: 'add_note',
+            demandId: target.id,
+            existingNotes: target.notes,
+            formattedNote,
+            demandSummary: target.summary
+          };
           setPendingAction(senderNumber, action);
           await msg.reply(confirmationPrompt(action));
           return;

@@ -174,6 +174,31 @@ describe('classify()', () => {
     expect(result.queryFilters).toBeNull();
   });
 
+  test('classifies add_note with demandIndex and note text', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'add_note', category: 'rotina', priority: 'low',
+      summary: 'Nota adicionada', demandIndex: 2, resolved: false,
+      queryFilters: null, note: 'Liguei para o fornecedor, aguardando retorno'
+    }));
+
+    const result = await classify('adicionar nota na demanda 2: liguei para o fornecedor');
+
+    expect(result.type).toBe('add_note');
+    expect(result.demandIndex).toBe(2);
+    expect(result.note).toBe('Liguei para o fornecedor, aguardando retorno');
+  });
+
+  test('sets note to null for non-add_note types', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'new_demand', category: 'rotina', priority: 'low', summary: 'Demanda',
+      demandIndex: null, resolved: false, queryFilters: null
+    }));
+
+    const result = await classify('falta papel');
+
+    expect(result.note).toBeNull();
+  });
+
   test('defaults queryFilters.status to open when LLM omits it', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
       type: 'query', category: 'rotina', priority: 'low', summary: 'Consulta',

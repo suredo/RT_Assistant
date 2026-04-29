@@ -11,7 +11,7 @@ export interface FormatOptions {
 }
 
 export function formatDemand(
-  demand: { priority: string; summary: string; category?: string; status?: string },
+  demand: { priority: string; summary: string; category?: string; status?: string; notes?: string },
   opts: FormatOptions = {}
 ): string {
   const resolved = opts.showStatus && demand.status === 'resolved';
@@ -23,5 +23,6 @@ export function formatDemand(
   // priority emoji already signals open — only ✅ needs an explicit marker
   if (extras.length) line += ` (${extras.join(', ')})`;
 
-  return opts.index !== undefined ? `${opts.index}. ${line}` : line;
+  const result = opts.index !== undefined ? `${opts.index}. ${line}` : line;
+  return demand.notes ? `${result}\n   📝 ${demand.notes}` : result;
 }

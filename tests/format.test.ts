@@ -52,4 +52,22 @@ describe('formatDemand()', () => {
     expect(formatDemand(base, { showCategory: true, showStatus: true }))
       .toBe('🔴 Paciente na cadeira 3');
   });
+
+  test('appends notes on a second line when present', () => {
+    const demand = { ...base, notes: '[29/04 14:32] Liguei para o fornecedor' };
+    expect(formatDemand(demand)).toBe(
+      '🔴 Paciente na cadeira 3\n   📝 [29/04 14:32] Liguei para o fornecedor'
+    );
+  });
+
+  test('notes appear after index prefix', () => {
+    const demand = { ...base, notes: '[29/04 14:32] Aguardando retorno' };
+    expect(formatDemand(demand, { index: 1 })).toBe(
+      '1. 🔴 Paciente na cadeira 3\n   📝 [29/04 14:32] Aguardando retorno'
+    );
+  });
+
+  test('does not show notes line when notes is undefined', () => {
+    expect(formatDemand(base)).toBe('🔴 Paciente na cadeira 3');
+  });
 });

@@ -21,7 +21,8 @@ export function addTurn(sender: string, role: 'user' | 'assistant', content: str
 export type PendingAction =
   | { type: 'save'; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'update'; demandId: string; fields: { priority: string; summary: string } }
-  | { type: 'resolve'; demandId: string; demandPriority: string; demandSummary: string };
+  | { type: 'resolve'; demandId: string; demandPriority: string; demandSummary: string }
+  | { type: 'add_note'; demandId: string; existingNotes: string | undefined; formattedNote: string; demandSummary: string };
 
 const pendingActions = new Map<string, PendingAction>();
 

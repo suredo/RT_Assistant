@@ -12,6 +12,7 @@ export interface Demand {
   created_at?: string;
   resolved_at?: string;
   whatsapp_message_id?: string;
+  notes?: string;
 }
 
 const supabase: SupabaseClient = createClient(
@@ -29,7 +30,7 @@ export async function saveDemand(demand: Omit<Demand, 'id' | 'status' | 'created
   return data;
 }
 
-export type DemandUpdate = Partial<Pick<Demand, 'summary' | 'category' | 'priority' | 'status'>>;
+export type DemandUpdate = Partial<Pick<Demand, 'summary' | 'category' | 'priority' | 'status' | 'notes'>>;
 
 export async function updateDemand(id: string, fields: DemandUpdate): Promise<void> {
   const { error } = await supabase
@@ -43,6 +44,15 @@ export async function resolveDemand(id: string): Promise<void> {
   const { error } = await supabase
     .from('demands')
     .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function appendNote(id: string, existingNotes: string | undefined, formattedNote: string): Promise<void> {
+  const notes = existingNotes ? `${existingNotes}\n${formattedNote}` : formattedNote;
+  const { error } = await supabase
+    .from('demands')
+    .update({ notes })
     .eq('id', id);
   if (error) throw error;
 }

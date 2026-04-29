@@ -83,6 +83,18 @@ describe('pending action store', () => {
     expect((getPendingAction('sender_a') as any).demandId).toBe('id-a');
     expect((getPendingAction('sender_b') as any).demandId).toBe('id-b');
   });
+
+  test('stores and retrieves an add_note action', () => {
+    const action = {
+      type: 'add_note' as const,
+      demandId: 'abc-123',
+      existingNotes: '[29/04 10:00] Nota anterior',
+      formattedNote: '[29/04 14:32] Liguei para o fornecedor',
+      demandSummary: 'Falta de dipirona'
+    };
+    setPendingAction('5563999999999', action);
+    expect(getPendingAction('5563999999999')).toEqual(action);
+  });
 });
 
 describe('isConfirmation()', () => {
