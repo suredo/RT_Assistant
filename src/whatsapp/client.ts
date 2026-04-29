@@ -177,10 +177,9 @@ async function createClient(): Promise<void> {
       }
 
       // ── LLM reply for queries and unmatched messages ───────────────────────
-      // Clear history before a query so the answer comes from the DB-injected
-      // system prompt, not from stale conversation context.
-      if (classification.type === 'query') clearHistory(senderNumber);
-
+      // History is intentionally kept across queries — the system prompt always
+      // injects fresh DB data, so conversation continuity ("Quero mais detalhes")
+      // works without re-specifying the demand number each time.
       let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
       let quotedMessageId: string | null = null;
 
