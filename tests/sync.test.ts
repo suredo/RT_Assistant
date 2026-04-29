@@ -4,6 +4,7 @@ const mockClassify = jest.fn();
 const mockSaveDemand = jest.fn();
 const mockFindDemandByMessage = jest.fn();
 const mockGetChatById = jest.fn();
+const mockGetContacts = jest.fn();
 const mockSendMessage = jest.fn();
 
 jest.mock('../src/db/botState', () => ({
@@ -22,6 +23,7 @@ jest.mock('../src/db/supabase', () => ({
 
 const mockClient = {
   getChatById: mockGetChatById,
+  getContacts: mockGetContacts,
   sendMessage: mockSendMessage,
 } as unknown as import('whatsapp-web.js').Client;
 
@@ -140,6 +142,22 @@ describe('syncMissedDemands()', () => {
     expect(count).toBe(0);
     expect(mockSaveDemand).not.toHaveBeenCalled();
     expect(mockSetLastActive).not.toHaveBeenCalled();
+  });
+
+  test('falls back to getContacts when getChatById throws No LID for user', async () => {
+    const msg = makeMessage({ body: 'paciente caiu' });
+    const mockGetChat = jest.fn().mockResolvedValue({ fetchMessages: jest.fn().mockResolvedValue([msg]) });
+    mockGetChatById.mockRejectedValue(new Error('No LID for user'));
+    mockGetContacts.mockResolvedValue([{ number: '5511999999999', getChat: mockGetChat }]);
+    mockClassify.mockResolvedValue({ type: 'new_demand', summary: 'Queda', category: 'urgência clínica', priority: 'high' });
+    mockFindDemandByMessage.mockResolvedValue(null);
+    mockSaveDemand.mockResolvedValue({ id: 'abc' });
+
+    const count = await syncMissedDemands(mockClient);
+
+    expect(mockGetContacts).toHaveBeenCalled();
+    expect(mockGetChat).toHaveBeenCalled();
+    expect(count).toBe(1);
   });
 
   test('sends plural message for multiple demands', async () => {

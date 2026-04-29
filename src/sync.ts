@@ -9,14 +9,25 @@ export async function syncMissedDemands(client: Client): Promise<number> {
 
   // Prefer LID-based chat ID when RT_LID is set — @c.us lookup throws
   // "No LID for user" on accounts where WhatsApp uses LIDs internally.
+  // If both paths fail, auto-detect via contacts so no manual config is needed.
   const rtLid = process.env.RT_LID?.trim();
-  const rtChatId = rtLid ? `${rtLid}@lid` : `${process.env.RT_NUMBER}@c.us`;
+  const rtNumber = process.env.RT_NUMBER?.trim();
+  const rtChatId = rtLid ? `${rtLid}@lid` : `${rtNumber}@c.us`;
   let chat;
   try {
     chat = await client.getChatById(rtChatId);
   } catch (err) {
-    console.error('⚠️ Sync: não foi possível obter o chat da RT:', err);
-    return 0;
+    if (String(err).includes('No LID')) {
+      try {
+        const contacts = await client.getContacts();
+        const rtContact = contacts.find(c => c.number === rtNumber);
+        if (rtContact) chat = await rtContact.getChat();
+      } catch { /* fall through */ }
+    }
+    if (!chat) {
+      console.error('⚠️ Sync: não foi possível obter o chat da RT:', err);
+      return 0;
+    }
   }
 
   const messages = await chat.fetchMessages({ limit: 100 });
