@@ -177,11 +177,11 @@ async function createClient(): Promise<void> {
       }
 
       // ── LLM reply for queries and unmatched messages ───────────────────────
-      // History is intentionally kept across queries — the system prompt always
-      // injects fresh DB data, so conversation continuity ("Quero mais detalhes")
-      // works without re-specifying the demand number each time.
+      // Clear history before a query so the answer comes from the DB-injected
+      // system prompt, not from stale conversation context.
+      if (classification.type === 'query') clearHistory(senderNumber);
+
       let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-      let quotedMessageId: string | null = null;
 
       if (role === 'rt') {
         // For queries with explicit filters, fetch exactly what was asked for.
@@ -219,14 +219,11 @@ async function createClient(): Promise<void> {
           systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
 
           // When asking about a specific demand by index, include the original
-          // message text for context and capture its ID for a quoted reply.
+          // message text so the LLM can cite it in the response.
           if (classification.demandIndex !== null) {
             const target = demandsForContext[classification.demandIndex - 1];
             if (target?.message) {
               systemPrompt += `\n\nMensagem original da demanda ${classification.demandIndex}: "${target.message}"`;
-            }
-            if (target?.whatsapp_message_id) {
-              quotedMessageId = target.whatsapp_message_id;
             }
           }
         }
@@ -238,11 +235,7 @@ async function createClient(): Promise<void> {
       addTurn(senderNumber, 'assistant', response);
 
       console.log(`🤖 Resposta: ${response}\n`);
-      if (quotedMessageId) {
-        await client.sendMessage(msgChat.id._serialized, response, { quotedMessageId });
-      } else {
-        await msg.reply(response);
-      }
+      await msg.reply(response);
     } finally {
       clearInterval(typingInterval);
     }
