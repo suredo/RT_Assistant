@@ -48,6 +48,24 @@ describe('saveDemand()', () => {
     );
   });
 
+  test('includes whatsapp_message_id when provided', async () => {
+    mockInsert.mockReturnValue({
+      select: () => ({ single: () => ({ data: { id: '123' }, error: null }) })
+    });
+
+    await saveDemand({
+      message: 'paciente caiu',
+      summary: 'Queda',
+      category: 'urgência clínica',
+      priority: 'high',
+      whatsapp_message_id: 'false_5511999999999_ABCDEF'
+    });
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ whatsapp_message_id: 'false_5511999999999_ABCDEF' })
+    );
+  });
+
   test('throws when Supabase returns an error', async () => {
     mockInsert.mockReturnValue({
       select: () => ({ single: () => ({ data: null, error: new Error('DB error') }) })

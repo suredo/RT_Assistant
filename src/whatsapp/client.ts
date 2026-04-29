@@ -27,7 +27,7 @@ function confirmationPrompt(action: PendingAction): string {
 
 async function executePendingAction(action: PendingAction): Promise<void> {
   if (action.type === 'save') {
-    await saveDemand(action.demand);
+    await saveDemand({ ...action.demand, whatsapp_message_id: action.messageId });
   } else if (action.type === 'update') {
     await updateDemand(action.demandId, action.fields);
   } else {
@@ -152,7 +152,8 @@ async function createClient(): Promise<void> {
             summary: classification.summary,
             category: classification.category,
             priority: classification.priority
-          }
+          },
+          messageId: msg.id._serialized
         };
         setPendingAction(senderNumber, action);
         await msg.reply(confirmationPrompt(action));
@@ -215,6 +216,15 @@ async function createClient(): Promise<void> {
             .map((d, i) => formatDemand(d, { index: i + 1, showStatus }))
             .join('\n');
           systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
+
+          // When asking about a specific demand, include the original message
+          // text so the bot can cite exactly what was said when it was created.
+          if (classification.demandIndex !== null) {
+            const target = demandsForContext[classification.demandIndex - 1];
+            if (target?.message) {
+              systemPrompt += `\n\nMensagem original da demanda ${classification.demandIndex}: "${target.message}"`;
+            }
+          }
         }
       }
 

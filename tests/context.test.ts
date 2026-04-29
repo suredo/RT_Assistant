@@ -63,7 +63,8 @@ describe('pending action store', () => {
   test('stores and retrieves a pending save action', () => {
     const action = {
       type: 'save' as const,
-      demand: { message: 'texto', summary: 'resumo', category: 'rotina', priority: 'low' }
+      demand: { message: 'texto', summary: 'resumo', category: 'rotina', priority: 'low' },
+      messageId: 'false_5511999999999_ABCDEF1234567890'
     };
     setPendingAction('5563999999999', action);
     expect(getPendingAction('5563999999999')).toEqual(action);

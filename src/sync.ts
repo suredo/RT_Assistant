@@ -36,7 +36,8 @@ export async function syncMissedDemands(client: Client): Promise<number> {
       message: msg.body,
       summary: classification.summary,
       category: classification.category,
-      priority: classification.priority
+      priority: classification.priority,
+      whatsapp_message_id: msg.id._serialized
     });
     count++;
   }

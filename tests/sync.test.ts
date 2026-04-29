@@ -38,6 +38,7 @@ function makeMessage(overrides: Partial<{
     fromMe: false,
     type: 'chat',
     body: 'paciente caiu',
+    id: { _serialized: 'false_5511999999999_ABCDEF1234567890' },
     ...overrides,
   };
 }
@@ -61,7 +62,10 @@ describe('syncMissedDemands()', () => {
     const count = await syncMissedDemands(mockClient);
 
     expect(count).toBe(1);
-    expect(mockSaveDemand).toHaveBeenCalledWith(expect.objectContaining({ message: 'paciente caiu' }));
+    expect(mockSaveDemand).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'paciente caiu',
+      whatsapp_message_id: 'false_5511999999999_ABCDEF1234567890'
+    }));
     expect(mockSetLastActive).toHaveBeenCalled();
     expect(mockSendMessage).toHaveBeenCalledWith('5511999999999@c.us', expect.stringContaining('1'));
   });

@@ -19,7 +19,7 @@ export function addTurn(sender: string, role: 'user' | 'assistant', content: str
 // ── Pending action store ─────────────────────────────────────────────────────
 
 export type PendingAction =
-  | { type: 'save'; demand: { message: string; summary: string; category: string; priority: string } }
+  | { type: 'save'; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'update'; demandId: string; fields: { priority: string; summary: string } }
   | { type: 'resolve'; demandId: string; demandPriority: string; demandSummary: string };
 

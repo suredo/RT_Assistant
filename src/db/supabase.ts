@@ -11,6 +11,7 @@ export interface Demand {
   status?: string;
   created_at?: string;
   resolved_at?: string;
+  whatsapp_message_id?: string;
 }
 
 const supabase: SupabaseClient = createClient(
