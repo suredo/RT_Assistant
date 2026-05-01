@@ -1,3 +1,9 @@
+export function noteTimestamp(): string {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `[${pad(now.getDate())}/${pad(now.getMonth() + 1)} ${pad(now.getHours())}:${pad(now.getMinutes())}]`;
+}
+
 export const PRIORITY_EMOJI: Record<string, string> = {
   high:   '🔴',
   medium: '🟡',

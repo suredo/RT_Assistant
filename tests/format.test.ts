@@ -1,4 +1,4 @@
-import { formatDemand } from '../src/format';
+import { formatDemand, noteTimestamp } from '../src/format';
 
 const base = { priority: 'high', summary: 'Paciente na cadeira 3' };
 
@@ -69,5 +69,19 @@ describe('formatDemand()', () => {
 
   test('does not show notes line when notes is undefined', () => {
     expect(formatDemand(base)).toBe('🔴 Paciente na cadeira 3');
+  });
+});
+
+describe('noteTimestamp()', () => {
+  test('returns timestamp in [DD/MM HH:MM] format', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T14:32:00'));
+    expect(noteTimestamp()).toBe('[29/04 14:32]');
+    jest.useRealTimers();
+  });
+
+  test('pads single-digit day, month, hour and minute with leading zero', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-01-05T09:07:00'));
+    expect(noteTimestamp()).toBe('[05/01 09:07]');
+    jest.useRealTimers();
   });
 });

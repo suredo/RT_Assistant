@@ -12,14 +12,8 @@ import {
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
-import { formatDemand } from '../format';
+import { formatDemand, noteTimestamp } from '../format';
 import puppeteer from 'puppeteer';
-
-function noteTimestamp(): string {
-  const now = new Date();
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `[${pad(now.getDate())}/${pad(now.getMonth() + 1)} ${pad(now.getHours())}:${pad(now.getMinutes())}]`;
-}
 
 function confirmationPrompt(action: PendingAction): string {
   if (action.type === 'save') {
@@ -263,7 +257,12 @@ async function createClient(): Promise<void> {
       addTurn(senderNumber, 'assistant', response);
 
       console.log(`🤖 Resposta: ${response}\n`);
-      await msg.reply(response);
+      try {
+        await msg.reply(response);
+      } catch (err) {
+        console.warn('⚠️ msg.reply falhou, enviando sem citação:', err);
+        await client.sendMessage(msg.from, response);
+      }
     } finally {
       clearInterval(typingInterval);
     }
