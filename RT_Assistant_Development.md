@@ -1647,4 +1647,256 @@ ALTER TABLE demands ADD COLUMN notes TEXT;
 
 ---
 
+## 18. Workflow Engine
+
+### Overview
+
+The workflow engine lets the RT trigger multi-step automated sequences via natural language. Workflows are stored in Supabase and fully manageable via WhatsApp — no code changes needed to create or edit them.
+
+**Design goals:**
+- AI-inferred triggers — no exact keywords, LLM matches intent against workflow descriptions
+- Minimal friction — single confirmation per meaningful action, free-text answers for questions
+- Natural language throughout — she describes what she needs, the bot figures out the rest
+- Persistent state — workflow instances survive bot restarts
+
+**Motivation:** The tester feedback is that the current experience is too rigid for real clinic work. She needs to trigger structured sequences (e.g. onboarding a new hire, patient discharge checklist), generate message drafts from templates, and schedule notifications — all without learning commands.
+
+---
+
+### Supabase Tables (run migrations once per table)
+
+#### `workflows`
+```sql
+CREATE TABLE workflows (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        text NOT NULL,
+  description text NOT NULL,
+  is_active   boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+```
+`description` is fed to the LLM to match trigger messages. Written in plain language describing when the workflow should fire (e.g. "Quando um novo funcionário é contratado").
+
+#### `workflow_steps`
+```sql
+CREATE TABLE workflow_steps (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id   uuid NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  step_order    integer NOT NULL,
+  step_type     text NOT NULL,
+  content       text NOT NULL,
+  variable_name text,
+  template_id   uuid REFERENCES message_templates(id) ON DELETE SET NULL,
+  UNIQUE (workflow_id, step_order)
+);
+CREATE INDEX ON workflow_steps (workflow_id, step_order);
+```
+`step_type` is open text — validated in the engine, not the DB, so new types can be added without migrations.
+
+#### `message_templates`
+```sql
+CREATE TABLE message_templates (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL UNIQUE,
+  content    text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+Reusable message blueprints with `{{variable}}` placeholders. Referenced by workflow steps or used standalone.
+
+#### `workflow_instances`
+```sql
+CREATE TABLE workflow_instances (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id         uuid NOT NULL REFERENCES workflows(id),
+  sender              text NOT NULL,
+  current_step_order  integer NOT NULL DEFAULT 1,
+  variables           jsonb NOT NULL DEFAULT '{}',
+  status              text NOT NULL DEFAULT 'active',
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON workflow_instances (sender, status);
+```
+One active instance per sender at a time (enforced in application layer). `variables` accumulates values captured from trigger message and `ask_question` steps.
+
+#### `notifications`
+```sql
+CREATE TABLE notifications (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient    text NOT NULL,
+  content      text NOT NULL,
+  scheduled_at timestamptz,
+  cron_expr    text,
+  status       text NOT NULL DEFAULT 'pending',
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON notifications (status, scheduled_at);
+```
+`scheduled_at` null = immediate. `cron_expr` non-null = recurring (node-cron syntax). Dispatcher runs every minute.
+
+---
+
+### Step Types
+
+| Type | Behavior | Needs confirmation? |
+|---|---|---|
+| `send_message` | Interpolate template → send to RT automatically | No |
+| `ask_question` | Ask RT a question, store answer as `variable_name` | No (free text answer) |
+| `create_demand` | Interpolate → classify for category/priority → stage demand | Yes |
+| `create_notification` | Interpolate → stage notification record | Yes |
+
+New types are added by registering a handler in `src/workflows/engine.ts` — no DB or schema changes needed.
+
+---
+
+### Variable Interpolation
+
+All `content` fields support `{{variable_name}}` placeholders:
+- Variables are extracted from the trigger message by the LLM (e.g. "Frank foi contratado" → `{name: "Frank"}`)
+- `ask_question` step answers are stored under the step's `variable_name`
+- Variables accumulate across steps in the instance's `variables` JSONB column
+- Interpolation happens immediately before each step executes
+- Unknown placeholders are left as-is and never throw
+
+```
+content: "Registrar admissão de {{name}}, cargo: {{role}}"
+variables: { name: "Frank", role: "Técnico de enfermagem" }
+result:    "Registrar admissão de Frank, cargo: Técnico de enfermagem"
+```
+
+---
+
+### New Modules
+
+| Module | Purpose | Test file |
+|---|---|---|
+| `src/db/workflows.ts` | Supabase CRUD for all 5 new tables | `tests/workflows-db.test.ts` |
+| `src/workflows/interpolate.ts` | Pure `{{variable}}` string utilities | `tests/interpolate.test.ts` |
+| `src/workflows/engine.ts` | Step execution orchestrator — returns `StepResult`, never touches WhatsApp | `tests/engine.test.ts` |
+| `src/workflows/manager.ts` | Natural-language workflow management (create/list/edit via WhatsApp) | `tests/manager.test.ts` |
+| `src/workflows/notifications.ts` | Cron dispatcher for scheduled notifications | `tests/notifications.test.ts` |
+
+---
+
+### Changes to Existing Modules
+
+| Module | Change |
+|---|---|
+| `src/ai/classifier.ts` | Add `trigger_workflow` and `manage_workflows` intent types; optional `activeWorkflows` param injected into prompt |
+| `src/ai/context.ts` | Add `advance_workflow` and `create_notification` PendingAction types; add in-memory `activeWorkflowMap` (Supabase is source of truth, map is a fast lookup cache) |
+| `src/whatsapp/client.ts` | New decision order in message handler; new `handleStepResult()` helper; extend `executePendingAction()`; rehydrate workflow state on `ready` |
+
+**Message handler decision order (client.ts):**
+1. `getActiveWorkflow(sender)` → if set, treat message as `ask_question` answer
+2. `getPendingAction(sender)` → existing confirmation flow
+3. Fetch `activeWorkflows` from DB
+4. `classify(msg, activeWorkflows)`
+5. `trigger_workflow` → `triggerWorkflow()` → `handleStepResult()`
+6. `manage_workflows` → `handleWorkflowManagement()` → reply
+7. Existing intents (new_demand, update, query, add_note, other) — unchanged
+
+---
+
+### Engine StepResult Type
+
+`engine.ts` returns instructions to `client.ts` rather than calling WhatsApp directly (keeps it testable):
+
+```typescript
+type StepResult =
+  | { action: 'send_message';         content: string }
+  | { action: 'ask_question';         prompt: string; variableName: string }
+  | { action: 'confirm_demand';       pendingAction: PendingAction; confirmPrompt: string }
+  | { action: 'confirm_notification'; pendingAction: PendingAction; confirmPrompt: string }
+  | { action: 'workflow_complete';    summary: string }
+  | { action: 'workflow_cancelled' }
+```
+
+---
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| `step_type` is open text, not a DB enum | New step types (e.g. `send_email`) can be added by registering an engine handler — no DB migration needed |
+| Engine returns `StepResult`, never calls WhatsApp | Keeps engine pure and unit-testable; `client.ts` is the only WhatsApp-touching layer |
+| `ask_question` bypasses `PendingAction` | PendingAction is a yes/no gate; question answers are free text and must not be confused with confirmations |
+| `create_demand` inside workflow reuses existing `PendingAction` | Zero changes to the confirmation UI; engine wraps the DB write in an `advance_workflow` PendingAction |
+| In-memory `activeWorkflowMap` + Supabase source of truth | Fast per-message lookup without a DB query; rehydrated from Supabase on bot restart |
+| `activeWorkflows` injected into `classify()`, not fetched inside it | Keeps classifier stateless and testable |
+
+---
+
+### Implementation Slices
+
+#### Slice 1 — Foundation
+- [ ] DB migrations (run all 5 tables in Supabase)
+- [ ] `src/db/workflows.ts` — CRUD for all tables
+- [ ] `tests/workflows-db.test.ts`
+- [ ] `src/workflows/interpolate.ts` — `interpolate()`, `extractVariableNames()`, `missingVariables()`
+- [ ] `tests/interpolate.test.ts`
+
+No visible behavior change. Data layer and string utilities in place and tested.
+
+#### Slice 2 — Trigger + Linear Execution
+- [ ] Extend `src/ai/classifier.ts` — add `trigger_workflow`, `manage_workflows`; inject active workflows into prompt
+- [ ] Update `tests/classifier.test.ts`
+- [ ] Extend `src/ai/context.ts` — add `activeWorkflowMap`, new PendingAction types
+- [ ] Update `tests/context.test.ts`
+- [ ] `src/workflows/engine.ts` — `send_message` and `ask_question` step types only
+- [ ] `tests/engine.test.ts` (send_message + ask_question)
+- [ ] Extend `src/whatsapp/client.ts` — new handler order, `handleStepResult()`, rehydration on `ready`
+
+She can now create a workflow in Supabase and trigger it via WhatsApp. Variable capture and multi-step conversation work.
+
+#### Slice 3 — Demand and Notification Steps
+- [ ] Add `create_demand` and `create_notification` step types to `src/workflows/engine.ts`
+- [ ] Extend `tests/engine.test.ts`
+- [ ] Extend `src/whatsapp/client.ts` — `executePendingAction` for `advance_workflow` and `create_notification`
+
+Full end-to-end workflows work (e.g. onboarding with demand creation and notifications).
+
+#### Slice 4 — Workflow Management via WhatsApp
+- [ ] `src/workflows/manager.ts` — create/list/edit/toggle workflows via natural language
+- [ ] `tests/manager.test.ts`
+
+She no longer needs Supabase access to manage workflows.
+
+#### Slice 5 — Notification Dispatcher
+- [ ] `src/workflows/notifications.ts` — cron dispatcher, every-minute poll, recurring support
+- [ ] `tests/notifications.test.ts`
+
+Scheduled and recurring notifications fire automatically. Feature complete.
+
+---
+
+### Workflow Example — Novo Funcionário
+
+```
+Workflows table:
+  name: "Novo funcionário"
+  description: "Quando um novo colaborador é contratado ou admitido"
+
+workflow_steps:
+  1. send_message    "Iniciando cadastro de {{name}}. Vou registrar as etapas necessárias."
+  2. ask_question    "Qual o cargo de {{name}}?" → variable_name: "role"
+  3. create_demand   "Registrar admissão: {{name}}, cargo: {{role}}"
+  4. send_message    "✅ Demanda criada. Não esqueça de solicitar os documentos de {{name}}."
+```
+
+```
+RT:  "Frank foi contratado"
+Bot: "Iniciando cadastro de Frank. Vou registrar as etapas necessárias."
+Bot: "Qual o cargo de Frank?"
+RT:  "Técnico de enfermagem"
+Bot: "📝 Vou registrar esta demanda:
+      🟡 Registrar admissão: Frank, cargo: Técnico de enfermagem
+      Confirma? (sim/não)"
+RT:  "sim"
+Bot: "✅ Feito!"
+Bot: "✅ Demanda criada. Não esqueça de solicitar os documentos de Frank."
+```
+
+---
+
 *Living document — update as decisions are made.*
