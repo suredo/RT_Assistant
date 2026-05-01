@@ -91,7 +91,7 @@ Use **whatsapp-web.js** or **Baileys** to connect the AI to a regular WhatsApp n
 
 - [ ] Create calendar events through conversation
 - [ ] Set alarms and reminders
-- [ ] Save important notes
+- [x] Save important notes
 - [ ] Automatic reminders for upcoming report deadlines
 
 ---
@@ -647,18 +647,32 @@ Two files work together:
 ```typescript
 export type Role = 'rt' | 'team';
 
-export function getRole(from: string): Role | null {
-  const rt = process.env.RT_NUMBER?.trim();
-  const rtLid = process.env.RT_LID?.trim();
-  if ((rt && from.includes(rt)) || (rtLid && from.includes(rtLid))) return 'rt';
+function parseList(env: string | undefined): string[] {
+  return (env ?? '').split(',').map(n => n.trim()).filter(Boolean);
+}
 
-  const team = (process.env.TEAM_NUMBERS ?? '').split(',').map(n => n.trim()).filter(Boolean);
-  const teamLids = (process.env.TEAM_LIDS ?? '').split(',').map(n => n.trim()).filter(Boolean);
+export function getRtNumbers(): string[] { return parseList(process.env.RT_NUMBER); }
+export function getRtLids(): string[]    { return parseList(process.env.RT_LID); }
+
+export function getRole(from: string): Role | null {
+  if ([...getRtNumbers(), ...getRtLids()].some(n => from.includes(n))) return 'rt';
+
+  const team = parseList(process.env.TEAM_NUMBERS);
+  const teamLids = parseList(process.env.TEAM_LIDS);
   if ([...team, ...teamLids].some(n => from.includes(n))) return 'team';
 
   return null;
 }
 ```
+
+`RT_NUMBER` and `RT_LID` both accept **comma-separated values**, enabling multiple RT identities (e.g. two phones for the same person):
+
+```
+RT_NUMBER=5511999999999,5522888888888
+RT_LID=262538902147114,999888777666555
+```
+
+`getRtNumbers()` / `getRtLids()` parse these into arrays and are used by `sync.ts` (loops over every RT chat) and `briefing.ts` (sends morning briefing to all RT numbers in parallel). Single-value configs continue to work unchanged.
 
 > ⚠️ Newer WhatsApp versions use Linked Device IDs (`@lid`) instead of phone numbers. `msg.getContact()` resolves the actual identifier — use `RT_LID` / `TEAM_LIDS` if authorization fails with just phone numbers.
 
@@ -1593,6 +1607,43 @@ ALTER TABLE demands ADD COLUMN whatsapp_message_id TEXT;
 - Only triggers for queries that reference a specific demand by number (e.g. "me fala mais sobre a demanda 3")
 - If the original message is too old for WhatsApp to render a preview, the message still sends normally — no error
 - Demands created before this feature was added have `whatsapp_message_id = NULL` and fall back to `msg.reply()` silently
+
+---
+
+## 17. Demand Notes — Append-Only Activity Log
+
+### Overview
+
+The RT can attach timestamped notes to any existing demand via WhatsApp. Notes accumulate as an append-only log and are displayed inline when the bot lists demands.
+
+Example interaction:
+> "adicionar nota na demanda 2: liguei para o fornecedor, aguardando retorno"
+
+### Supabase migration (run once)
+
+```sql
+ALTER TABLE demands ADD COLUMN notes TEXT;
+```
+
+### How it works
+
+| Step | Where | What happens |
+|---|---|---|
+| Message classified | `src/ai/classifier.ts` | Type `add_note`, fields: `demandIndex` (1-based), `note` (text) |
+| Note staged | `src/whatsapp/client.ts` | `noteTimestamp()` prefixes the note; stored in `add_note` PendingAction |
+| RT confirms | `executePendingAction` | `appendNote(id, existing, newNote)` concatenates with `\n` onto existing notes |
+| Display | `src/format.ts` — `formatDemand()` | Notes shown indented on a second line: `📝 [29/04 14:32] texto` |
+
+### Key functions
+
+- **`noteTimestamp()`** — `src/format.ts` — returns `[DD/MM HH:MM]` prefix using current time. Exported and unit-tested.
+- **`appendNote(id, existing, newNote)`** — `src/db/supabase.ts` — writes `existing + '\n' + newNote` (or just `newNote` if no existing notes) to Supabase.
+
+### Behaviour
+
+- Notes are never replaced — each new note is appended, preserving history
+- The confirmation prompt shows the full formatted note before it's saved
+- If the demand index doesn't exist, the bot responds naturally (LLM handles it via context)
 
 ---
 
