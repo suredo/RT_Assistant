@@ -1663,9 +1663,20 @@ The workflow engine lets the RT trigger multi-step automated sequences via natur
 
 ---
 
-### Supabase Tables (run migrations once per table)
+### Supabase Tables (run in this order — dependencies matter)
 
-#### `workflows`
+#### 1. `message_templates`
+```sql
+CREATE TABLE message_templates (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL UNIQUE,
+  content    text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+Reusable message blueprints with `{{variable}}` placeholders. Referenced by workflow steps or used standalone.
+
+#### 2. `workflows`
 ```sql
 CREATE TABLE workflows (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1677,7 +1688,7 @@ CREATE TABLE workflows (
 ```
 `description` is fed to the LLM to match trigger messages. Written in plain language describing when the workflow should fire (e.g. "Quando um novo funcionário é contratado").
 
-#### `workflow_steps`
+#### 3. `workflow_steps`
 ```sql
 CREATE TABLE workflow_steps (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1693,18 +1704,7 @@ CREATE INDEX ON workflow_steps (workflow_id, step_order);
 ```
 `step_type` is open text — validated in the engine, not the DB, so new types can be added without migrations.
 
-#### `message_templates`
-```sql
-CREATE TABLE message_templates (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name       text NOT NULL UNIQUE,
-  content    text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-```
-Reusable message blueprints with `{{variable}}` placeholders. Referenced by workflow steps or used standalone.
-
-#### `workflow_instances`
+#### 4. `workflow_instances`
 ```sql
 CREATE TABLE workflow_instances (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1720,7 +1720,7 @@ CREATE INDEX ON workflow_instances (sender, status);
 ```
 One active instance per sender at a time (enforced in application layer). `variables` accumulates values captured from trigger message and `ask_question` steps.
 
-#### `notifications`
+#### 5. `notifications`
 ```sql
 CREATE TABLE notifications (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
