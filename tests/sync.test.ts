@@ -54,11 +54,17 @@ function makeChat(serialized = '5511999999999@c.us', messages: object[] = []) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.spyOn(console, 'log').mockImplementation(() => {});
+  jest.spyOn(console, 'error').mockImplementation(() => {});
   process.env.RT_NUMBER = '5511999999999';
   delete process.env.RT_LID;
   mockGetLastActive.mockResolvedValue(new Date(LAST_UNIX * 1000));
   mockSetLastActive.mockResolvedValue(undefined);
   mockSendMessage.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('syncMissedDemands()', () => {

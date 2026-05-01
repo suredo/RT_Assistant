@@ -35,9 +35,11 @@ describe('reply()', () => {
   });
 
   test('returns Portuguese fallback message on API error', async () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockPost.mockRejectedValue(new Error('API timeout'));
     const result = await reply('oi');
     expect(result).toContain('⚠️');
+    spy.mockRestore();
   });
 
   test('prepends system prompt to the request', async () => {
