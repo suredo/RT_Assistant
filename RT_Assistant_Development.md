@@ -1868,9 +1868,10 @@ Full end-to-end workflows work (e.g. onboarding with demand creation and notific
 
 She no longer needs Supabase access to manage workflows.
 
-#### Slice 5 — Notification Dispatcher
-- [ ] `src/workflows/notifications.ts` — cron dispatcher, every-minute poll, recurring support
-- [ ] `tests/notifications.test.ts`
+#### Slice 5 — Notification Dispatcher ✅
+- [x] `src/workflows/notifications.ts` — `sendPendingNotifications()` polls every minute for one-time notifications; `scheduleRecurringNotifications()` registers in-memory node-cron jobs for recurring ones; `startNotificationDispatcher()` wires both with an immediate first run; `_stopAllJobs()` + `getScheduledJobCount()` for testability
+- [x] `src/whatsapp/client.ts` — call `startNotificationDispatcher(client)` in `ready` handler
+- [x] `tests/notifications.test.ts` — 12 tests covering send, skip, error resilience, double-schedule guard, invalid cron, callback firing, job cleanup
 
 Scheduled and recurring notifications fire automatically. Feature complete.
 

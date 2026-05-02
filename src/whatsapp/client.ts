@@ -14,6 +14,7 @@ import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, ge
 import { getActiveWorkflows, getActiveInstance, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, StepResult } from '../workflows/engine';
 import { handleManageWorkflows } from '../workflows/manager';
+import { startNotificationDispatcher } from '../workflows/notifications';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
 import { formatDemand, noteTimestamp } from '../format';
@@ -120,6 +121,7 @@ async function createClient(): Promise<void> {
     await syncMissedDemands(client);
     startBriefingSchedule(client);
     startHeartbeat();
+    startNotificationDispatcher(client);
   });
 
   client.on('auth_failure', () => {
