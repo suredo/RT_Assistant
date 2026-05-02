@@ -40,6 +40,11 @@ async function executePendingAction(action: PendingAction, sender: string, sendF
     await appendNote(action.demandId, action.existingNotes, action.formattedNote);
   } else if (action.type === 'resolve') {
     await resolveDemand(action.demandId);
+  } else if (action.type === 'workflow_save_demand') {
+    await saveDemand({ ...action.demand, whatsapp_message_id: action.messageId || undefined });
+    const result = await advanceAfterConfirmation(action.instanceId);
+    await handleStepResult(result, sender, sendFn);
+    return;
   } else if (action.type === 'advance_workflow') {
     const result = await advanceAfterConfirmation(action.instanceId);
     await handleStepResult(result, sender, sendFn);
@@ -194,7 +199,8 @@ async function createClient(): Promise<void> {
             clearPendingAction(senderNumber);
             clearHistory(senderNumber);
             // For workflow steps, handleStepResult already sent the next message
-            if (pending.type !== 'advance_workflow' && pending.type !== 'create_notification') {
+            const workflowTypes = ['advance_workflow', 'workflow_save_demand', 'create_notification'];
+            if (!workflowTypes.includes(pending.type)) {
               await sendFn('✅ Feito!');
             }
           } catch (err) {

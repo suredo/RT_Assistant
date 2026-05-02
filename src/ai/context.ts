@@ -24,6 +24,7 @@ export type PendingAction =
   | { type: 'resolve'; demandId: string; demandPriority: string; demandSummary: string }
   | { type: 'add_note'; demandId: string; existingNotes: string | undefined; formattedNote: string; demandSummary: string }
   | { type: 'advance_workflow'; instanceId: string; stepSummary: string }
+  | { type: 'workflow_save_demand'; instanceId: string; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'create_notification'; instanceId: string | null; recipient: string; content: string; scheduledAt?: string; cronExpr?: string; notificationSummary: string };
 
 const pendingActions = new Map<string, PendingAction>();

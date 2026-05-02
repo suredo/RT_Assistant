@@ -85,6 +85,17 @@ describe('pending action store', () => {
     expect((getPendingAction('sender_b') as any).demandId).toBe('id-b');
   });
 
+  test('stores and retrieves a workflow_save_demand action', () => {
+    const action = {
+      type: 'workflow_save_demand' as const,
+      instanceId: 'inst-abc',
+      demand: { message: 'Registrar admissão', summary: 'Admissão de Frank', category: 'administrativo', priority: 'low' },
+      messageId: ''
+    };
+    setPendingAction('5563999999999', action);
+    expect(getPendingAction('5563999999999')).toEqual(action);
+  });
+
   test('stores and retrieves an advance_workflow action', () => {
     const action = {
       type: 'advance_workflow' as const,

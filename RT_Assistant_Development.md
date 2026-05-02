@@ -1849,10 +1849,13 @@ No visible behavior change. Data layer and string utilities in place and tested.
 
 She can now create a workflow in Supabase and trigger it via WhatsApp. Variable capture and multi-step conversation work.
 
-#### Slice 3 — Demand and Notification Steps
-- [ ] Add `create_demand` and `create_notification` step types to `src/workflows/engine.ts`
-- [ ] Extend `tests/engine.test.ts`
-- [ ] `executePendingAction` for `advance_workflow` and `create_notification` already wired in client.ts ✅
+#### Slice 3 — Demand and Notification Steps ✅
+- [x] Add `create_demand` step type to engine — classifies content via LLM, returns `confirm_demand` with `workflow_save_demand` PendingAction
+- [x] Add `create_notification` step type to engine — stages notification with sender as recipient, returns `confirm_notification`
+- [x] Add `workflow_save_demand` PendingAction type to `src/ai/context.ts`
+- [x] Wire `workflow_save_demand` in `executePendingAction` (saves demand → advances workflow)
+- [x] Extend `tests/engine.test.ts` — `create_demand` and `create_notification` step handlers
+- [x] Extend `tests/context.test.ts` — `workflow_save_demand` type
 
 Full end-to-end workflows work (e.g. onboarding with demand creation and notifications).
 

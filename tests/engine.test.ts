@@ -11,6 +11,14 @@ jest.mock('../src/workflows/interpolate', () => ({
   interpolate: jest.fn((template: string) => template),
 }));
 
+jest.mock('../src/ai/classifier', () => ({
+  classify: jest.fn(),
+}));
+
+jest.mock('../src/format', () => ({
+  formatDemand: jest.fn(() => '🟡 Admissão de Frank — administrativo'),
+}));
+
 import {
   triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow,
 } from '../src/workflows/engine';
@@ -19,6 +27,8 @@ import {
   advanceInstance, completeInstance, cancelInstance,
 } from '../src/db/workflows';
 import { interpolate } from '../src/workflows/interpolate';
+import { classify } from '../src/ai/classifier';
+import { formatDemand } from '../src/format';
 
 const mockGetSteps      = jest.mocked(getWorkflowSteps);
 const mockGetInstance   = jest.mocked(getInstanceById);
@@ -27,6 +37,8 @@ const mockAdvance       = jest.mocked(advanceInstance);
 const mockComplete      = jest.mocked(completeInstance);
 const mockCancel        = jest.mocked(cancelInstance);
 const mockInterpolate   = jest.mocked(interpolate);
+const mockClassify      = jest.mocked(classify);
+const mockFormatDemand  = jest.mocked(formatDemand);
 
 const INSTANCE = {
   id: 'inst-1',
@@ -50,9 +62,24 @@ const STEP_ASK = {
   variable_name: 'role',
 };
 
+const CLASSIFY_RESULT = {
+  type: 'new_demand' as const,
+  category: 'administrativo' as const,
+  priority: 'low' as const,
+  summary: 'Admissão de Frank',
+  demandIndex: null,
+  resolved: false,
+  queryFilters: null,
+  note: null,
+  workflowId: null,
+  workflowVariables: null,
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockInterpolate.mockImplementation((t: string) => t);
+  mockClassify.mockResolvedValue(CLASSIFY_RESULT);
+  mockFormatDemand.mockReturnValue('🟡 Admissão de Frank — administrativo');
 });
 
 // ── triggerWorkflow ────────────────────────────────────────────────────────────
@@ -99,7 +126,7 @@ describe('triggerWorkflow()', () => {
   test('returns error for unknown step type', async () => {
     mockCreate.mockResolvedValue(INSTANCE);
     mockGetSteps.mockResolvedValue([
-      { id: 's1', workflow_id: 'wf-1', step_order: 1, step_type: 'create_demand', content: 'Registrar {{name}}' }
+      { id: 's1', workflow_id: 'wf-1', step_order: 1, step_type: 'send_email', content: 'Enviar email para {{name}}' }
     ]);
 
     const result = await triggerWorkflow('wf-1', '5511999', {});
@@ -238,6 +265,92 @@ describe('answerQuestion()', () => {
     const result = await answerQuestion('missing', 'resposta');
 
     expect(result.action).toBe('error');
+  });
+});
+
+// ── create_demand step ─────────────────────────────────────────────────────────
+
+describe('triggerWorkflow() — create_demand step', () => {
+  const STEP_DEMAND = {
+    id: 's1', workflow_id: 'wf-1', step_order: 1,
+    step_type: 'create_demand', content: 'Registrar admissão de {{name}}',
+  };
+
+  test('classifies content and returns confirm_demand with workflow_save_demand action', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_DEMAND]);
+
+    const result = await triggerWorkflow('wf-1', '5511999', { name: 'Frank' });
+
+    expect(mockClassify).toHaveBeenCalledWith('Registrar admissão de {{name}}');
+    expect(result.action).toBe('confirm_demand');
+    if (result.action === 'confirm_demand') {
+      expect(result.pendingAction.type).toBe('workflow_save_demand');
+      if (result.pendingAction.type === 'workflow_save_demand') {
+        expect(result.pendingAction.instanceId).toBe('inst-1');
+        expect(result.pendingAction.demand.summary).toBe('Admissão de Frank');
+        expect(result.pendingAction.demand.category).toBe('administrativo');
+        expect(result.pendingAction.demand.priority).toBe('low');
+      }
+      expect(result.confirmPrompt).toContain('Vou registrar');
+    }
+  });
+
+  test('uses formatDemand to build the confirmation prompt', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_DEMAND]);
+    mockFormatDemand.mockReturnValue('🟡 Admissão de Frank — administrativo');
+
+    const result = await triggerWorkflow('wf-1', '5511999', { name: 'Frank' });
+
+    expect(mockFormatDemand).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Admissão de Frank' }),
+      { showCategory: true }
+    );
+    if (result.action === 'confirm_demand') {
+      expect(result.confirmPrompt).toContain('🟡 Admissão de Frank — administrativo');
+    }
+  });
+});
+
+// ── create_notification step ───────────────────────────────────────────────────
+
+describe('triggerWorkflow() — create_notification step', () => {
+  const STEP_NOTIF = {
+    id: 's1', workflow_id: 'wf-1', step_order: 1,
+    step_type: 'create_notification', content: 'Lembrete: reunião às 14h',
+  };
+
+  test('returns confirm_notification with create_notification action', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_NOTIF]);
+
+    const result = await triggerWorkflow('wf-1', '5511999', {});
+
+    expect(result.action).toBe('confirm_notification');
+    if (result.action === 'confirm_notification') {
+      expect(result.pendingAction.type).toBe('create_notification');
+      if (result.pendingAction.type === 'create_notification') {
+        expect(result.pendingAction.instanceId).toBe('inst-1');
+        expect(result.pendingAction.recipient).toBe('5511999');
+        expect(result.pendingAction.content).toBe('Lembrete: reunião às 14h');
+      }
+      expect(result.confirmPrompt).toContain('Vou criar esta notificação');
+      expect(result.confirmPrompt).toContain('Lembrete: reunião às 14h');
+    }
+  });
+
+  test('truncates long content in notificationSummary', async () => {
+    const longContent = 'A'.repeat(100);
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([{ ...STEP_NOTIF, content: longContent }]);
+    mockInterpolate.mockReturnValue(longContent);
+
+    const result = await triggerWorkflow('wf-1', '5511999', {});
+
+    if (result.action === 'confirm_notification' && result.pendingAction.type === 'create_notification') {
+      expect(result.pendingAction.notificationSummary.length).toBeLessThanOrEqual(80);
+    }
   });
 });
 

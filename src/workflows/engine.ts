@@ -8,7 +8,9 @@ import {
   WorkflowInstance,
 } from '../db/workflows';
 import { interpolate } from './interpolate';
+import { classify } from '../ai/classifier';
 import { PendingAction } from '../ai/context';
+import { formatDemand } from '../format';
 
 export type StepResult =
   | { action: 'send_message';         content: string; instanceId: string }
@@ -42,7 +44,26 @@ async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
     return { action: 'ask_question', prompt: content, variableName: step.variable_name, instanceId: instance.id };
   }
 
-  // Slice 3 will handle create_demand and create_notification
+  if (step.step_type === 'create_demand') {
+    const cl = await classify(content);
+    const demand = { message: content, summary: cl.summary, category: cl.category, priority: cl.priority };
+    const pendingAction: PendingAction = { type: 'workflow_save_demand', instanceId: instance.id, demand, messageId: '' };
+    const confirmPrompt = `📝 Vou registrar esta demanda:\n${formatDemand(demand, { showCategory: true })}\n\nConfirma? (sim/não)`;
+    return { action: 'confirm_demand', pendingAction, confirmPrompt };
+  }
+
+  if (step.step_type === 'create_notification') {
+    const pendingAction: PendingAction = {
+      type: 'create_notification',
+      instanceId: instance.id,
+      recipient: instance.sender,
+      content,
+      notificationSummary: content.length > 80 ? content.slice(0, 77) + '...' : content,
+    };
+    const confirmPrompt = `🔔 Vou criar esta notificação:\n${content}\n\nConfirma? (sim/não)`;
+    return { action: 'confirm_notification', pendingAction, confirmPrompt };
+  }
+
   return { action: 'error', message: `Tipo de passo "${step.step_type}" ainda não suportado nesta versão.` };
 }
 
