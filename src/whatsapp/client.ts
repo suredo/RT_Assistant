@@ -106,14 +106,20 @@ export async function handleMessage(
   // ── Check for active workflow (ask_question in progress) ─────────────────
   let activeInstanceId = getActiveWorkflow(senderNumber);
   if (!activeInstanceId) {
-    // Lazy rehydration: covers the bot-restart case
-    try {
-      const activeInst = await getActiveInstance(senderNumber);
-      if (activeInst) {
-        activeInstanceId = activeInst.id;
-        setActiveWorkflow(senderNumber, activeInstanceId);
-      }
-    } catch { /* non-critical */ }
+    // Lazy rehydration: covers the bot-restart case.
+    // Skip if there is already a pending confirmation — the workflow paused to
+    // wait for user confirmation (create_demand / create_notification step) and
+    // 'sim'/'não' must go to executePendingAction, not answerQuestion.
+    const hasPending = !!getPendingAction(senderNumber);
+    if (!hasPending) {
+      try {
+        const activeInst = await getActiveInstance(senderNumber);
+        if (activeInst) {
+          activeInstanceId = activeInst.id;
+          setActiveWorkflow(senderNumber, activeInstanceId);
+        }
+      } catch { /* non-critical */ }
+    }
   }
   if (activeInstanceId) {
     if (isRejection(body)) {
