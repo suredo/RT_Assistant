@@ -5,7 +5,7 @@
  * DB modules must already be mocked (via jest.mock) before importing this.
  */
 
-import { handleMessage } from '../../../src/whatsapp/client';
+import { handleMessage } from '../../../src/whatsapp/handler';
 import { clearHistory, clearPendingAction, clearActiveWorkflow } from '../../../src/ai/context';
 
 export class ConversationSimulator {

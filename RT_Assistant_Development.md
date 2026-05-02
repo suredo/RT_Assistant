@@ -1908,7 +1908,47 @@ Bot: "✅ Demanda criada. Não esqueça de solicitar os documentos de Frank."
 
 ## 19. Future Work
 
-### 19.1 Local Development Mode (SQLite backend)
+### 19.1 Terminal REPL ✅
+
+A readline interface that feeds messages directly into `handleMessage()`, bypassing WhatsApp entirely. No second phone number needed — test AI behavior, prompts, workflow flows, and confirmation dialogs straight from the terminal.
+
+#### Usage
+
+```bash
+npm run repl          # RT role (default)
+npm run repl:team     # team member role
+```
+
+Optional env vars:
+```
+REPL_SENDER=5511888888888   # fake sender number (default: 5511999999999)
+REPL_ROLE=team              # "rt" or "team" (default: "rt")
+```
+
+Special commands inside the REPL:
+```
+/reset   clear conversation history and all pending state for this sender
+/quit    exit
+```
+
+#### Architecture
+
+`handleMessage()` lives in `src/whatsapp/handler.ts` — no WhatsApp or puppeteer imports. `client.ts` is now a pure transport layer that imports from `handler.ts`. The REPL imports from `handler.ts` directly, so starting the REPL does not attempt to launch Chrome or connect to WhatsApp.
+
+#### What you can test without WhatsApp
+
+- Classification routing (`new_demand`, `query`, `trigger_workflow`, `manage_workflows`, …)
+- Full workflow conversations (trigger → ask_question → confirm → complete)
+- Confirmation + rejection flows
+- Demand creation, update, resolve, add_note
+- LLM prompt changes and edge cases
+- Any new feature before wiring it into the bot
+
+Reads and writes against the real Supabase. Once Section 19.2 (local SQLite mode) is implemented, `npm run repl` will support `DB_BACKEND=local` for a fully offline dev loop.
+
+---
+
+### 19.2 Local Development Mode (SQLite backend)
 
 **Status: Planned**
 
