@@ -25,7 +25,7 @@ jest.mock('@supabase/supabase-js', () => ({
 }));
 
 import {
-  getActiveWorkflows, getWorkflowById, createWorkflow, updateWorkflow,
+  getActiveWorkflows, getAllWorkflows, getWorkflowById, createWorkflow, updateWorkflow,
   getWorkflowSteps, createWorkflowStep, deleteWorkflowSteps,
   getTemplates, getTemplateById, createTemplate, updateTemplate,
   getInstanceById, getActiveInstance, createInstance, advanceInstance, completeInstance, cancelInstance,
@@ -64,6 +64,27 @@ describe('getActiveWorkflows()', () => {
   test('throws on error', async () => {
     mockSelect.mockReturnValue({ eq: jest.fn().mockReturnValue({ order: jest.fn().mockResolvedValue({ data: null, error: new Error('DB error') }) }) });
     await expect(getActiveWorkflows()).rejects.toThrow('DB error');
+  });
+});
+
+describe('getAllWorkflows()', () => {
+  test('returns all workflows regardless of is_active status', async () => {
+    const rows = [
+      { id: 'w1', name: 'Active WF', is_active: true },
+      { id: 'w2', name: 'Inactive WF', is_active: false },
+    ];
+    mockSelect.mockReturnValue({ order: jest.fn().mockResolvedValue({ data: rows, error: null }) });
+    expect(await getAllWorkflows()).toEqual(rows);
+  });
+
+  test('returns empty array when table is empty', async () => {
+    mockSelect.mockReturnValue({ order: jest.fn().mockResolvedValue({ data: null, error: null }) });
+    expect(await getAllWorkflows()).toEqual([]);
+  });
+
+  test('throws on error', async () => {
+    mockSelect.mockReturnValue({ order: jest.fn().mockResolvedValue({ data: null, error: new Error('DB error') }) });
+    await expect(getAllWorkflows()).rejects.toThrow('DB error');
   });
 });
 

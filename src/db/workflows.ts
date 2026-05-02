@@ -67,6 +67,15 @@ export async function getActiveWorkflows(): Promise<Workflow[]> {
   return data ?? [];
 }
 
+export async function getAllWorkflows(): Promise<Workflow[]> {
+  const { data, error } = await supabase
+    .from('workflows')
+    .select('*')
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function getWorkflowById(id: string): Promise<Workflow | null> {
   const { data, error } = await supabase
     .from('workflows')

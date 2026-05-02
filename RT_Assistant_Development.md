@@ -1859,9 +1859,12 @@ She can now create a workflow in Supabase and trigger it via WhatsApp. Variable 
 
 Full end-to-end workflows work (e.g. onboarding with demand creation and notifications).
 
-#### Slice 4 — Workflow Management via WhatsApp
-- [ ] `src/workflows/manager.ts` — create/list/edit/toggle workflows via natural language
-- [ ] `tests/manager.test.ts`
+#### Slice 4 — Workflow Management via WhatsApp ✅
+- [x] `src/db/workflows.ts` — add `getAllWorkflows()` (includes inactive; used by manager)
+- [x] `src/workflows/manager.ts` — LLM-parsed commands: list / create / edit / toggle; `formatWorkflowList()` exported for testability
+- [x] `src/whatsapp/client.ts` — route `manage_workflows` classification to `handleManageWorkflows()`
+- [x] `tests/manager.test.ts` — 22 tests covering all operations and fallback/error paths
+- [x] `tests/workflows-db.test.ts` — 3 new tests for `getAllWorkflows()`
 
 She no longer needs Supabase access to manage workflows.
 

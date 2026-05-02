@@ -13,6 +13,7 @@ import {
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { getActiveWorkflows, getActiveInstance, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, StepResult } from '../workflows/engine';
+import { handleManageWorkflows } from '../workflows/manager';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
 import { formatDemand, noteTimestamp } from '../format';
@@ -250,6 +251,18 @@ async function createClient(): Promise<void> {
         } catch (err) {
           console.error('⚠️ Erro ao iniciar workflow:', err);
           await sendFn('⚠️ Erro ao iniciar o fluxo. Tente novamente.');
+        }
+        return;
+      }
+
+      // ── Manage workflows ───────────────────────────────────────────────────
+      if (classification.type === 'manage_workflows') {
+        try {
+          const response = await handleManageWorkflows(msg.body);
+          await sendFn(response);
+        } catch (err) {
+          console.error('⚠️ Erro ao gerenciar workflow:', err);
+          await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
         }
         return;
       }
