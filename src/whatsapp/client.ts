@@ -92,6 +92,219 @@ async function handleStepResult(
   }
 }
 
+// ── Core message handler (exported for e2e testing) ───────────────────────────
+// Contains all business logic. The WhatsApp event handler in createClient()
+// handles transport concerns (getting contact number, typing indicator, sendFn
+// construction) and delegates here.
+
+export async function handleMessage(
+  body: string,
+  senderNumber: string,
+  role: 'rt' | 'team',
+  sendFn: (content: string) => Promise<void>,
+): Promise<void> {
+  // ── Check for active workflow (ask_question in progress) ─────────────────
+  let activeInstanceId = getActiveWorkflow(senderNumber);
+  if (!activeInstanceId) {
+    // Lazy rehydration: covers the bot-restart case
+    try {
+      const activeInst = await getActiveInstance(senderNumber);
+      if (activeInst) {
+        activeInstanceId = activeInst.id;
+        setActiveWorkflow(senderNumber, activeInstanceId);
+      }
+    } catch { /* non-critical */ }
+  }
+  if (activeInstanceId) {
+    if (isRejection(body)) {
+      await cancelWorkflow(activeInstanceId);
+      clearActiveWorkflow(senderNumber);
+      await sendFn('❌ Fluxo cancelado. Como posso ajudar?');
+      return;
+    }
+    const result = await answerQuestion(activeInstanceId, body);
+    await handleStepResult(result, senderNumber, sendFn);
+    return;
+  }
+
+  // ── Check for a pending confirmation ─────────────────────────────────────
+  const pending = getPendingAction(senderNumber);
+  if (pending) {
+    if (isConfirmation(body)) {
+      try {
+        await executePendingAction(pending, senderNumber, sendFn);
+        clearPendingAction(senderNumber);
+        clearHistory(senderNumber);
+        const workflowTypes = ['advance_workflow', 'workflow_save_demand', 'create_notification'];
+        if (!workflowTypes.includes(pending.type)) {
+          await sendFn('✅ Feito!');
+        }
+      } catch (err) {
+        console.error('⚠️ Erro ao executar ação pendente:', err);
+        clearPendingAction(senderNumber);
+        await sendFn('⚠️ Erro ao executar a ação. Tente novamente.');
+      }
+      return;
+    }
+    if (isRejection(body)) {
+      clearPendingAction(senderNumber);
+      await sendFn('Cancelado. Como posso ajudar?');
+      return;
+    }
+    // Unrelated message — clear pending and process normally
+    clearPendingAction(senderNumber);
+  }
+
+  // ── Fetch open demands (RT only) ─────────────────────────────────────────
+  let openDemands: Demand[] = [];
+  if (role === 'rt') {
+    try {
+      openDemands = await getOpenDemands({ days: 7 });
+    } catch (err) {
+      console.error('⚠️ Erro ao buscar demandas:', err);
+    }
+  }
+
+  // ── Fetch active workflows for classifier ─────────────────────────────────
+  let activeWorkflows: Array<{ id: string; name: string; description: string }> = [];
+  try {
+    activeWorkflows = await getActiveWorkflows();
+  } catch { /* non-critical — classifier falls back to base prompt */ }
+
+  // ── Keyword pre-check for workflow management ─────────────────────────────
+  if (isWorkflowManagementMessage(body)) {
+    try {
+      const response = await handleManageWorkflows(body);
+      await sendFn(response);
+    } catch (err) {
+      console.error('⚠️ Erro ao gerenciar workflow:', err);
+      await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
+    }
+    return;
+  }
+
+  // ── Classify ──────────────────────────────────────────────────────────────
+  const classification = await classify(body, activeWorkflows);
+
+  // ── Trigger workflow ──────────────────────────────────────────────────────
+  if (classification.type === 'trigger_workflow' && classification.workflowId) {
+    try {
+      const result = await triggerWorkflow(classification.workflowId, senderNumber, classification.workflowVariables ?? {});
+      await handleStepResult(result, senderNumber, sendFn);
+    } catch (err) {
+      console.error('⚠️ Erro ao iniciar workflow:', err);
+      await sendFn('⚠️ Erro ao iniciar o fluxo. Tente novamente.');
+    }
+    return;
+  }
+
+  // ── Manage workflows ──────────────────────────────────────────────────────
+  if (classification.type === 'manage_workflows') {
+    try {
+      const response = await handleManageWorkflows(body);
+      await sendFn(response);
+    } catch (err) {
+      console.error('⚠️ Erro ao gerenciar workflow:', err);
+      await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
+    }
+    return;
+  }
+
+  // ── Stage write actions ───────────────────────────────────────────────────
+  if (classification.type === 'new_demand') {
+    const action: PendingAction = {
+      type: 'save',
+      demand: { message: body, summary: classification.summary, category: classification.category, priority: classification.priority },
+      messageId: ''
+    };
+    setPendingAction(senderNumber, action);
+    await sendFn(confirmationPrompt(action));
+    return;
+  }
+
+  if (classification.type === 'update' && classification.demandIndex !== null) {
+    const target = openDemands[classification.demandIndex - 1];
+    if (target?.id) {
+      let action: PendingAction;
+      if (classification.resolved) {
+        action = { type: 'resolve', demandId: target.id, demandPriority: target.priority, demandSummary: target.summary };
+      } else {
+        const mergedSummary = await mergeSummary(target.summary, body);
+        action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
+      }
+      setPendingAction(senderNumber, action);
+      await sendFn(confirmationPrompt(action));
+      return;
+    }
+  }
+
+  if (classification.type === 'add_note' && classification.demandIndex !== null && classification.note) {
+    const target = openDemands[classification.demandIndex - 1];
+    if (target?.id) {
+      const formattedNote = `${noteTimestamp()} ${classification.note}`;
+      const action: PendingAction = {
+        type: 'add_note',
+        demandId: target.id,
+        existingNotes: target.notes,
+        formattedNote,
+        demandSummary: target.summary
+      };
+      setPendingAction(senderNumber, action);
+      await sendFn(confirmationPrompt(action));
+      return;
+    }
+  }
+
+  // ── LLM reply ─────────────────────────────────────────────────────────────
+  if (classification.type === 'query') clearHistory(senderNumber);
+
+  let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+
+  if (role === 'rt') {
+    let demandsForContext = openDemands;
+    let sectionLabel = 'Demandas em aberto (últimos 7 dias)';
+    let showStatus = false;
+
+    const qf = classification.type === 'query' ? classification.queryFilters : null;
+    if (qf) {
+      const days = qf.status === 'open' ? 7 : 30;
+      try {
+        demandsForContext = await getDemands({
+          status: qf.status === 'all' ? undefined : qf.status,
+          category: qf.category ?? undefined,
+          priority: qf.priority ?? undefined,
+          days
+        });
+      } catch (err) {
+        console.error('⚠️ Erro ao buscar demandas filtradas:', err);
+      }
+      showStatus = qf.status !== 'open';
+      sectionLabel = qf.status === 'resolved' ? `Demandas resolvidas (últimos ${days} dias)`
+                   : qf.status === 'all'      ? `Todas as demandas (últimos ${days} dias)`
+                   : 'Demandas em aberto (últimos 7 dias)';
+      if (qf.category) sectionLabel += ` — ${qf.category}`;
+      if (qf.priority)  sectionLabel += ` — prioridade ${qf.priority}`;
+    }
+
+    if (demandsForContext.length) {
+      const demandList = demandsForContext.map((d, i) => formatDemand(d, { index: i + 1, showStatus })).join('\n');
+      systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
+      if (classification.demandIndex !== null) {
+        const target = demandsForContext[classification.demandIndex - 1];
+        if (target?.message) {
+          systemPrompt += `\n\nMensagem original da demanda ${classification.demandIndex}: "${target.message}"`;
+        }
+      }
+    }
+  }
+
+  const history = getHistory(senderNumber);
+  const response = await reply(body, history, systemPrompt);
+  addTurn(senderNumber, 'user', body);
+  addTurn(senderNumber, 'assistant', response);
+  await sendFn(response);
+}
+
 // Returns true when a message unambiguously intends to manage workflows,
 // regardless of what else the message contains (e.g. "criar uma demanda" inside
 // a workflow definition). This bypasses the LLM classifier for these cases.
@@ -185,229 +398,7 @@ async function createClient(): Promise<void> {
     };
 
     try {
-      // ── Check for active workflow (ask_question in progress) ───────────────
-      let activeInstanceId = getActiveWorkflow(senderNumber);
-      if (!activeInstanceId) {
-        // Lazy rehydration: covers the bot-restart case
-        try {
-          const activeInst = await getActiveInstance(senderNumber);
-          if (activeInst) {
-            activeInstanceId = activeInst.id;
-            setActiveWorkflow(senderNumber, activeInstanceId);
-          }
-        } catch { /* non-critical */ }
-      }
-      if (activeInstanceId) {
-        if (isRejection(msg.body)) {
-          await cancelWorkflow(activeInstanceId);
-          clearActiveWorkflow(senderNumber);
-          await sendFn('❌ Fluxo cancelado. Como posso ajudar?');
-          return;
-        }
-        const result = await answerQuestion(activeInstanceId, msg.body);
-        await handleStepResult(result, senderNumber, sendFn);
-        return;
-      }
-
-      // ── Check for a pending confirmation ───────────────────────────────────
-      const pending = getPendingAction(senderNumber);
-      if (pending) {
-        if (isConfirmation(msg.body)) {
-          try {
-            await executePendingAction(pending, senderNumber, sendFn);
-            clearPendingAction(senderNumber);
-            clearHistory(senderNumber);
-            // For workflow steps, handleStepResult already sent the next message
-            const workflowTypes = ['advance_workflow', 'workflow_save_demand', 'create_notification'];
-            if (!workflowTypes.includes(pending.type)) {
-              await sendFn('✅ Feito!');
-            }
-          } catch (err) {
-            console.error('⚠️ Erro ao executar ação pendente:', err);
-            clearPendingAction(senderNumber);
-            await sendFn('⚠️ Erro ao executar a ação. Tente novamente.');
-          }
-          return;
-        }
-        if (isRejection(msg.body)) {
-          clearPendingAction(senderNumber);
-          await sendFn('Cancelado. Como posso ajudar?');
-          return;
-        }
-        // Unrelated message — clear pending and process normally
-        clearPendingAction(senderNumber);
-      }
-
-      // ── Fetch open demands (RT only) ───────────────────────────────────────
-      let openDemands: Demand[] = [];
-      if (role === 'rt') {
-        try {
-          openDemands = await getOpenDemands({ days: 7 });
-        } catch (err) {
-          console.error('⚠️ Erro ao buscar demandas:', err);
-        }
-      }
-
-      // ── Fetch active workflows for classifier ──────────────────────────────
-      let activeWorkflows: Array<{ id: string; name: string; description: string }> = [];
-      try {
-        activeWorkflows = await getActiveWorkflows();
-      } catch { /* non-critical — classifier falls back to base prompt */ }
-
-      // ── Keyword pre-check for workflow management ─────────────────────────
-      // GLM-4 misclassifies long workflow-management messages that contain
-      // demand-related phrases. Bypass the classifier for unambiguous cases.
-      if (isWorkflowManagementMessage(msg.body)) {
-        try {
-          const response = await handleManageWorkflows(msg.body);
-          await sendFn(response);
-        } catch (err) {
-          console.error('⚠️ Erro ao gerenciar workflow:', err);
-          await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
-        }
-        return;
-      }
-
-      // ── Classify ───────────────────────────────────────────────────────────
-      const classification = await classify(msg.body, activeWorkflows);
-
-      // ── Trigger workflow ───────────────────────────────────────────────────
-      if (classification.type === 'trigger_workflow' && classification.workflowId) {
-        try {
-          const result = await triggerWorkflow(
-            classification.workflowId,
-            senderNumber,
-            classification.workflowVariables ?? {}
-          );
-          await handleStepResult(result, senderNumber, sendFn);
-        } catch (err) {
-          console.error('⚠️ Erro ao iniciar workflow:', err);
-          await sendFn('⚠️ Erro ao iniciar o fluxo. Tente novamente.');
-        }
-        return;
-      }
-
-      // ── Manage workflows ───────────────────────────────────────────────────
-      if (classification.type === 'manage_workflows') {
-        try {
-          const response = await handleManageWorkflows(msg.body);
-          await sendFn(response);
-        } catch (err) {
-          console.error('⚠️ Erro ao gerenciar workflow:', err);
-          await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
-        }
-        return;
-      }
-
-      // ── Stage write actions — ask for confirmation instead of writing directly
-      if (classification.type === 'new_demand') {
-        const action: PendingAction = {
-          type: 'save',
-          demand: {
-            message: msg.body,
-            summary: classification.summary,
-            category: classification.category,
-            priority: classification.priority
-          },
-          messageId: msg.id._serialized
-        };
-        setPendingAction(senderNumber, action);
-        await sendFn(confirmationPrompt(action));
-        return;
-      }
-
-      if (classification.type === 'update' && classification.demandIndex !== null) {
-        const target = openDemands[classification.demandIndex - 1];
-        if (target?.id) {
-          let action: PendingAction;
-          if (classification.resolved) {
-            action = { type: 'resolve', demandId: target.id, demandPriority: target.priority, demandSummary: target.summary };
-          } else {
-            const mergedSummary = await mergeSummary(target.summary, msg.body);
-            action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
-          }
-          setPendingAction(senderNumber, action);
-          await sendFn(confirmationPrompt(action));
-          return;
-        }
-      }
-
-      if (classification.type === 'add_note' && classification.demandIndex !== null && classification.note) {
-        const target = openDemands[classification.demandIndex - 1];
-        if (target?.id) {
-          const formattedNote = `${noteTimestamp()} ${classification.note}`;
-          const action: PendingAction = {
-            type: 'add_note',
-            demandId: target.id,
-            existingNotes: target.notes,
-            formattedNote,
-            demandSummary: target.summary
-          };
-          setPendingAction(senderNumber, action);
-          await sendFn(confirmationPrompt(action));
-          return;
-        }
-      }
-
-      // ── LLM reply for queries and unmatched messages ───────────────────────
-      // Clear history before a query so the answer comes from the DB-injected
-      // system prompt, not from stale conversation context.
-      if (classification.type === 'query') clearHistory(senderNumber);
-
-      let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
-
-      if (role === 'rt') {
-        // For queries with explicit filters, fetch exactly what was asked for.
-        // For everything else (updates, new demands, etc.) use the open demands
-        // already fetched — they are what the index references point to.
-        let demandsForContext = openDemands;
-        let sectionLabel = 'Demandas em aberto (últimos 7 dias)';
-        let showStatus = false;
-
-        const qf = classification.type === 'query' ? classification.queryFilters : null;
-        if (qf) {
-          const days = qf.status === 'open' ? 7 : 30;
-          try {
-            demandsForContext = await getDemands({
-              status: qf.status === 'all' ? undefined : qf.status,
-              category: qf.category ?? undefined,
-              priority: qf.priority ?? undefined,
-              days
-            });
-          } catch (err) {
-            console.error('⚠️ Erro ao buscar demandas filtradas:', err);
-          }
-          showStatus = qf.status !== 'open';
-          sectionLabel = qf.status === 'resolved' ? `Demandas resolvidas (últimos ${days} dias)`
-                       : qf.status === 'all'      ? `Todas as demandas (últimos ${days} dias)`
-                       : 'Demandas em aberto (últimos 7 dias)';
-          if (qf.category) sectionLabel += ` — ${qf.category}`;
-          if (qf.priority)  sectionLabel += ` — prioridade ${qf.priority}`;
-        }
-
-        if (demandsForContext.length) {
-          const demandList = demandsForContext
-            .map((d, i) => formatDemand(d, { index: i + 1, showStatus }))
-            .join('\n');
-          systemPrompt += `\n\n## ${sectionLabel}:\n${demandList}\n\nPara atualizar ou resolver uma demanda, Bianca pode referenciar pelo número (ex: "demanda 2 foi resolvida").`;
-
-          // When asking about a specific demand by index, include the original
-          // message text so the LLM can cite it in the response.
-          if (classification.demandIndex !== null) {
-            const target = demandsForContext[classification.demandIndex - 1];
-            if (target?.message) {
-              systemPrompt += `\n\nMensagem original da demanda ${classification.demandIndex}: "${target.message}"`;
-            }
-          }
-        }
-      }
-
-      const history = getHistory(senderNumber);
-      const response = await reply(msg.body, history, systemPrompt);
-      addTurn(senderNumber, 'user', msg.body);
-      addTurn(senderNumber, 'assistant', response);
-
-      await sendFn(response);
+      await handleMessage(msg.body, senderNumber, role, sendFn);
     } finally {
       clearInterval(typingInterval);
     }
