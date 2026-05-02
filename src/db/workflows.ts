@@ -166,6 +166,16 @@ export async function updateTemplate(id: string, content: string): Promise<void>
 
 // ── Workflow Instances ────────────────────────────────────────────────────────
 
+export async function getInstanceById(id: string): Promise<WorkflowInstance | null> {
+  const { data, error } = await supabase
+    .from('workflow_instances')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
 export async function getActiveInstance(sender: string): Promise<WorkflowInstance | null> {
   const { data, error } = await supabase
     .from('workflow_instances')

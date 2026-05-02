@@ -22,7 +22,9 @@ export type PendingAction =
   | { type: 'save'; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'update'; demandId: string; fields: { priority: string; summary: string } }
   | { type: 'resolve'; demandId: string; demandPriority: string; demandSummary: string }
-  | { type: 'add_note'; demandId: string; existingNotes: string | undefined; formattedNote: string; demandSummary: string };
+  | { type: 'add_note'; demandId: string; existingNotes: string | undefined; formattedNote: string; demandSummary: string }
+  | { type: 'advance_workflow'; instanceId: string; stepSummary: string }
+  | { type: 'create_notification'; instanceId: string | null; recipient: string; content: string; scheduledAt?: string; cronExpr?: string; notificationSummary: string };
 
 const pendingActions = new Map<string, PendingAction>();
 
@@ -51,6 +53,24 @@ export function isRejection(message: string): boolean {
   return REJECTIONS.test(message.trim());
 }
 
+// ── Active workflow map ──────────────────────────────────────────────────────
+// Fast in-memory lookup for senders currently inside an ask_question step.
+// Supabase workflow_instances is the source of truth — this is a cache only.
+
+const activeWorkflowMap = new Map<string, string>(); // sender → instanceId
+
+export function setActiveWorkflow(sender: string, instanceId: string): void {
+  activeWorkflowMap.set(sender, instanceId);
+}
+
+export function getActiveWorkflow(sender: string): string | null {
+  return activeWorkflowMap.get(sender) ?? null;
+}
+
+export function clearActiveWorkflow(sender: string): void {
+  activeWorkflowMap.delete(sender);
+}
+
 // ── Test helper ──────────────────────────────────────────────────────────────
 
 export function clearHistory(sender: string): void {
@@ -60,4 +80,5 @@ export function clearHistory(sender: string): void {
 export function _reset(): void {
   buffers.clear();
   pendingActions.clear();
+  activeWorkflowMap.clear();
 }

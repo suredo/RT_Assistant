@@ -1838,21 +1838,21 @@ type StepResult =
 
 No visible behavior change. Data layer and string utilities in place and tested.
 
-#### Slice 2 — Trigger + Linear Execution
-- [ ] Extend `src/ai/classifier.ts` — add `trigger_workflow`, `manage_workflows`; inject active workflows into prompt
-- [ ] Update `tests/classifier.test.ts`
-- [ ] Extend `src/ai/context.ts` — add `activeWorkflowMap`, new PendingAction types
-- [ ] Update `tests/context.test.ts`
-- [ ] `src/workflows/engine.ts` — `send_message` and `ask_question` step types only
-- [ ] `tests/engine.test.ts` (send_message + ask_question)
-- [ ] Extend `src/whatsapp/client.ts` — new handler order, `handleStepResult()`, rehydration on `ready`
+#### Slice 2 — Trigger + Linear Execution ✅
+- [x] Extend `src/ai/classifier.ts` — add `trigger_workflow`, `manage_workflows`; inject active workflows into prompt
+- [x] Update `tests/classifier.test.ts`
+- [x] Extend `src/ai/context.ts` — add `activeWorkflowMap`, new PendingAction types
+- [x] Update `tests/context.test.ts`
+- [x] `src/workflows/engine.ts` — `send_message` and `ask_question` step types; `instanceId` in results
+- [x] `tests/engine.test.ts` (send_message + ask_question)
+- [x] Extend `src/whatsapp/client.ts` — new handler order, `handleStepResult()`, lazy rehydration via `getActiveInstance`
 
 She can now create a workflow in Supabase and trigger it via WhatsApp. Variable capture and multi-step conversation work.
 
 #### Slice 3 — Demand and Notification Steps
 - [ ] Add `create_demand` and `create_notification` step types to `src/workflows/engine.ts`
 - [ ] Extend `tests/engine.test.ts`
-- [ ] Extend `src/whatsapp/client.ts` — `executePendingAction` for `advance_workflow` and `create_notification`
+- [ ] `executePendingAction` for `advance_workflow` and `create_notification` already wired in client.ts ✅
 
 Full end-to-end workflows work (e.g. onboarding with demand creation and notifications).
 

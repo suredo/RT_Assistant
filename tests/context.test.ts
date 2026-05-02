@@ -2,6 +2,7 @@ import {
   getHistory, addTurn, clearHistory,
   setPendingAction, getPendingAction, clearPendingAction,
   isConfirmation, isRejection,
+  setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
   _reset
 } from '../src/ai/context';
 
@@ -84,6 +85,29 @@ describe('pending action store', () => {
     expect((getPendingAction('sender_b') as any).demandId).toBe('id-b');
   });
 
+  test('stores and retrieves an advance_workflow action', () => {
+    const action = {
+      type: 'advance_workflow' as const,
+      instanceId: 'inst-abc',
+      stepSummary: 'Enviar mensagem de boas-vindas'
+    };
+    setPendingAction('5563999999999', action);
+    expect(getPendingAction('5563999999999')).toEqual(action);
+  });
+
+  test('stores and retrieves a create_notification action', () => {
+    const action = {
+      type: 'create_notification' as const,
+      instanceId: 'inst-abc',
+      recipient: '5511999',
+      content: 'Lembrete de reunião',
+      scheduledAt: '2026-05-01T10:00:00Z',
+      notificationSummary: 'Lembrete para reunião'
+    };
+    setPendingAction('5563999999999', action);
+    expect(getPendingAction('5563999999999')).toEqual(action);
+  });
+
   test('stores and retrieves an add_note action', () => {
     const action = {
       type: 'add_note' as const,
@@ -94,6 +118,40 @@ describe('pending action store', () => {
     };
     setPendingAction('5563999999999', action);
     expect(getPendingAction('5563999999999')).toEqual(action);
+  });
+});
+
+describe('active workflow map', () => {
+  beforeEach(() => _reset());
+
+  test('returns null for unknown sender', () => {
+    expect(getActiveWorkflow('5511999')).toBeNull();
+  });
+
+  test('stores and retrieves instanceId for a sender', () => {
+    setActiveWorkflow('5511999', 'inst-abc');
+    expect(getActiveWorkflow('5511999')).toBe('inst-abc');
+  });
+
+  test('clearActiveWorkflow removes only the given sender', () => {
+    setActiveWorkflow('sender_a', 'inst-1');
+    setActiveWorkflow('sender_b', 'inst-2');
+    clearActiveWorkflow('sender_a');
+    expect(getActiveWorkflow('sender_a')).toBeNull();
+    expect(getActiveWorkflow('sender_b')).toBe('inst-2');
+  });
+
+  test('different senders have independent active workflows', () => {
+    setActiveWorkflow('sender_a', 'inst-1');
+    setActiveWorkflow('sender_b', 'inst-2');
+    expect(getActiveWorkflow('sender_a')).toBe('inst-1');
+    expect(getActiveWorkflow('sender_b')).toBe('inst-2');
+  });
+
+  test('_reset() clears the active workflow map', () => {
+    setActiveWorkflow('5511999', 'inst-xyz');
+    _reset();
+    expect(getActiveWorkflow('5511999')).toBeNull();
   });
 });
 

@@ -28,7 +28,7 @@ import {
   getActiveWorkflows, getWorkflowById, createWorkflow, updateWorkflow,
   getWorkflowSteps, createWorkflowStep, deleteWorkflowSteps,
   getTemplates, getTemplateById, createTemplate, updateTemplate,
-  getActiveInstance, createInstance, advanceInstance, completeInstance, cancelInstance,
+  getInstanceById, getActiveInstance, createInstance, advanceInstance, completeInstance, cancelInstance,
   createNotification, getPendingNotifications, markNotificationSent, cancelNotification,
 } from '../src/db/workflows';
 
@@ -113,6 +113,19 @@ describe('deleteWorkflowSteps()', () => {
 });
 
 // ── Instances ──────────────────────────────────────────────────────────────────
+
+describe('getInstanceById()', () => {
+  test('returns instance by id', async () => {
+    const instance = { id: 'i1', workflow_id: 'w1', sender: '5511999', current_step_order: 2, variables: { name: 'Frank' }, status: 'active' };
+    mockSelect.mockReturnValue({ eq: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: instance, error: null }) }) });
+    expect(await getInstanceById('i1')).toEqual(instance);
+  });
+
+  test('returns null when instance not found', async () => {
+    mockSelect.mockReturnValue({ eq: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: null, error: new Error('No rows') }) }) });
+    expect(await getInstanceById('missing')).toBeNull();
+  });
+});
 
 describe('getActiveInstance()', () => {
   test('returns active instance for sender', async () => {

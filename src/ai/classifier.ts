@@ -7,14 +7,16 @@ export interface QueryFilters {
 }
 
 export interface Classification {
-  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'other';
+  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'other';
   category: 'urgência clínica' | 'gestão de equipe' | 'equipe médica' | 'administrativo' | 'regulatório' | 'rotina';
   priority: 'high' | 'medium' | 'low';
   summary: string;
-  demandIndex: number | null; // 1-based index of the demand being referenced, if any
-  resolved: boolean;          // true when Bianca is closing/resolving the demand
-  queryFilters: QueryFilters | null; // non-null only when type === 'query'
-  note: string | null;        // non-null only when type === 'add_note'
+  demandIndex: number | null;
+  resolved: boolean;
+  queryFilters: QueryFilters | null;
+  note: string | null;
+  workflowId: string | null;
+  workflowVariables: Record<string, string> | null;
 }
 
 const FALLBACK: Classification = {
@@ -25,12 +27,14 @@ const FALLBACK: Classification = {
   demandIndex: null,
   resolved: false,
   queryFilters: null,
-  note: null
+  note: null,
+  workflowId: null,
+  workflowVariables: null
 };
 
-const CLASSIFY_PROMPT = `Você é um classificador de demandas de uma clínica de hemodiálise.
+const BASE_CLASSIFY_PROMPT = `Você é um classificador de demandas de uma clínica de hemodiálise.
 Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
-- type: "new_demand" | "update" | "query" | "add_note" | "other"
+- type: "new_demand" | "update" | "query" | "add_note" | "trigger_workflow" | "manage_workflows" | "other"
 - category: "urgência clínica" | "gestão de equipe" | "equipe médica" | "administrativo" | "regulatório" | "rotina"
 - priority: "high" | "medium" | "low"
 - summary: resumo curto da demanda em português (máximo 80 caracteres)
@@ -42,10 +46,25 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
   - priority: "high" | "medium" | "low" ou null se não especificada
   Quando type não é "query", retorne queryFilters como null.
 - note: quando type é "add_note", o texto da nota a ser registrada (extraído literalmente da mensagem após os dois-pontos ou equivalente); null para outros tipos.
+- workflowId: quando type é "trigger_workflow", o id do workflow correspondente; null para outros tipos.
+- workflowVariables: quando type é "trigger_workflow", um objeto com as variáveis extraídas da mensagem (ex: {"name": "Frank"}); null para outros tipos.
 
-Use type "add_note" quando a mensagem pede para registrar uma observação, andamento ou nota em uma demanda existente (ex: "adicionar nota na demanda 2: liguei para o fornecedor", "anotar na demanda 3 que o email foi enviado").
+Use type "add_note" quando a mensagem pede para registrar uma observação, andamento ou nota em uma demanda existente.
+Use type "manage_workflows" quando a mensagem pede para criar, listar, editar ou excluir workflows ou templates.
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
+
+function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string; description: string }>): string {
+  if (!activeWorkflows?.length) return BASE_CLASSIFY_PROMPT;
+  const workflowList = activeWorkflows
+    .map(w => `  - id: "${w.id}", nome: "${w.name}", gatilho: "${w.description}"`)
+    .join('\n');
+  return `${BASE_CLASSIFY_PROMPT}
+
+## Workflows ativos
+Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis relevantes em workflowVariables:
+${workflowList}`;
+}
 
 const MERGE_PROMPT = `Você está atualizando o resumo de uma demanda clínica.
 Combine o resumo atual com a nova informação em um único resumo coeso, em português, máximo 120 caracteres.
@@ -64,10 +83,13 @@ export async function mergeSummary(existingSummary: string, newMessage: string):
   }
 }
 
-export async function classify(message: string): Promise<Classification> {
+export async function classify(
+  message: string,
+  activeWorkflows?: Array<{ id: string; name: string; description: string }>
+): Promise<Classification> {
   try {
     const raw = await chat([
-      { role: 'system', content: CLASSIFY_PROMPT },
+      { role: 'system', content: buildClassifyPrompt(activeWorkflows) },
       { role: 'user', content: message }
     ]);
 
@@ -93,7 +115,11 @@ export async function classify(message: string): Promise<Classification> {
       demandIndex: typeof parsed.demandIndex === 'number' ? parsed.demandIndex : null,
       resolved: parsed.resolved === true,
       queryFilters,
-      note: type === 'add_note' && typeof parsed.note === 'string' ? parsed.note : null
+      note: type === 'add_note' && typeof parsed.note === 'string' ? parsed.note : null,
+      workflowId: type === 'trigger_workflow' && typeof parsed.workflowId === 'string' ? parsed.workflowId : null,
+      workflowVariables: type === 'trigger_workflow' && parsed.workflowVariables && typeof parsed.workflowVariables === 'object'
+        ? parsed.workflowVariables as Record<string, string>
+        : null
     };
   } catch {
     return FALLBACK;

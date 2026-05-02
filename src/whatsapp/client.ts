@@ -7,9 +7,12 @@ import {
   getHistory, addTurn, clearHistory,
   getPendingAction, setPendingAction, clearPendingAction,
   isConfirmation, isRejection,
+  setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
   PendingAction
 } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
+import { getActiveWorkflows, getActiveInstance, createNotification } from '../db/workflows';
+import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, StepResult } from '../workflows/engine';
 import { startBriefingSchedule, startHeartbeat } from '../briefing';
 import { syncMissedDemands } from '../sync';
 import { formatDemand, noteTimestamp } from '../format';
@@ -28,15 +31,54 @@ function confirmationPrompt(action: PendingAction): string {
   return `✅ Vou marcar como resolvida:\n${formatDemand({ priority: action.demandPriority, summary: action.demandSummary })}\n\nConfirma? (sim/não)`;
 }
 
-async function executePendingAction(action: PendingAction): Promise<void> {
+async function executePendingAction(action: PendingAction, sender: string, sendFn: (content: string) => Promise<void>): Promise<void> {
   if (action.type === 'save') {
     await saveDemand({ ...action.demand, whatsapp_message_id: action.messageId });
   } else if (action.type === 'update') {
     await updateDemand(action.demandId, action.fields);
   } else if (action.type === 'add_note') {
     await appendNote(action.demandId, action.existingNotes, action.formattedNote);
-  } else {
+  } else if (action.type === 'resolve') {
     await resolveDemand(action.demandId);
+  } else if (action.type === 'advance_workflow') {
+    const result = await advanceAfterConfirmation(action.instanceId);
+    await handleStepResult(result, sender, sendFn);
+    return;
+  } else if (action.type === 'create_notification') {
+    await createNotification(action.recipient, action.content, action.scheduledAt, action.cronExpr);
+    if (action.instanceId) {
+      const result = await advanceAfterConfirmation(action.instanceId);
+      await handleStepResult(result, sender, sendFn);
+      return;
+    }
+  }
+}
+
+async function handleStepResult(
+  result: StepResult,
+  sender: string,
+  sendFn: (content: string) => Promise<void>
+): Promise<void> {
+  // Auto-advance through consecutive send_message steps (no user input needed)
+  while (result.action === 'send_message') {
+    await sendFn(result.content);
+    result = await advanceAfterConfirmation(result.instanceId);
+  }
+
+  if (result.action === 'ask_question') {
+    setActiveWorkflow(sender, result.instanceId);
+    await sendFn(result.prompt);
+  } else if (result.action === 'confirm_demand' || result.action === 'confirm_notification') {
+    setPendingAction(sender, result.pendingAction);
+    await sendFn(result.confirmPrompt);
+  } else if (result.action === 'workflow_complete') {
+    clearActiveWorkflow(sender);
+    await sendFn(result.summary);
+  } else if (result.action === 'workflow_cancelled') {
+    clearActiveWorkflow(sender);
+    await sendFn('❌ Fluxo cancelado.');
+  } else if (result.action === 'error') {
+    await sendFn(`⚠️ ${result.message}`);
   }
 }
 
@@ -109,26 +151,62 @@ async function createClient(): Promise<void> {
     msgChat.sendStateTyping();
     const typingInterval = setInterval(() => msgChat.sendStateTyping(), 5000);
 
+    // Shared send helper — prefer msg.reply (keeps thread), fall back to sendMessage
+    const sendFn = async (content: string) => {
+      try {
+        await msg.reply(content);
+      } catch {
+        await client.sendMessage(msg.from, content);
+      }
+    };
+
     try {
+      // ── Check for active workflow (ask_question in progress) ───────────────
+      let activeInstanceId = getActiveWorkflow(senderNumber);
+      if (!activeInstanceId) {
+        // Lazy rehydration: covers the bot-restart case
+        try {
+          const activeInst = await getActiveInstance(senderNumber);
+          if (activeInst) {
+            activeInstanceId = activeInst.id;
+            setActiveWorkflow(senderNumber, activeInstanceId);
+          }
+        } catch { /* non-critical */ }
+      }
+      if (activeInstanceId) {
+        if (isRejection(msg.body)) {
+          await cancelWorkflow(activeInstanceId);
+          clearActiveWorkflow(senderNumber);
+          await sendFn('❌ Fluxo cancelado. Como posso ajudar?');
+          return;
+        }
+        const result = await answerQuestion(activeInstanceId, msg.body);
+        await handleStepResult(result, senderNumber, sendFn);
+        return;
+      }
+
       // ── Check for a pending confirmation ───────────────────────────────────
       const pending = getPendingAction(senderNumber);
       if (pending) {
         if (isConfirmation(msg.body)) {
           try {
-            await executePendingAction(pending);
+            await executePendingAction(pending, senderNumber, sendFn);
             clearPendingAction(senderNumber);
             clearHistory(senderNumber);
-            await msg.reply('✅ Feito!');
+            // For workflow steps, handleStepResult already sent the next message
+            if (pending.type !== 'advance_workflow' && pending.type !== 'create_notification') {
+              await sendFn('✅ Feito!');
+            }
           } catch (err) {
             console.error('⚠️ Erro ao executar ação pendente:', err);
             clearPendingAction(senderNumber);
-            await msg.reply('⚠️ Erro ao executar a ação. Tente novamente.');
+            await sendFn('⚠️ Erro ao executar a ação. Tente novamente.');
           }
           return;
         }
         if (isRejection(msg.body)) {
           clearPendingAction(senderNumber);
-          await msg.reply('Cancelado. Como posso ajudar?');
+          await sendFn('Cancelado. Como posso ajudar?');
           return;
         }
         // Unrelated message — clear pending and process normally
@@ -145,8 +223,30 @@ async function createClient(): Promise<void> {
         }
       }
 
+      // ── Fetch active workflows for classifier ──────────────────────────────
+      let activeWorkflows: Array<{ id: string; name: string; description: string }> = [];
+      try {
+        activeWorkflows = await getActiveWorkflows();
+      } catch { /* non-critical — classifier falls back to base prompt */ }
+
       // ── Classify ───────────────────────────────────────────────────────────
-      const classification = await classify(msg.body);
+      const classification = await classify(msg.body, activeWorkflows);
+
+      // ── Trigger workflow ───────────────────────────────────────────────────
+      if (classification.type === 'trigger_workflow' && classification.workflowId) {
+        try {
+          const result = await triggerWorkflow(
+            classification.workflowId,
+            senderNumber,
+            classification.workflowVariables ?? {}
+          );
+          await handleStepResult(result, senderNumber, sendFn);
+        } catch (err) {
+          console.error('⚠️ Erro ao iniciar workflow:', err);
+          await sendFn('⚠️ Erro ao iniciar o fluxo. Tente novamente.');
+        }
+        return;
+      }
 
       // ── Stage write actions — ask for confirmation instead of writing directly
       if (classification.type === 'new_demand') {
@@ -161,7 +261,7 @@ async function createClient(): Promise<void> {
           messageId: msg.id._serialized
         };
         setPendingAction(senderNumber, action);
-        await msg.reply(confirmationPrompt(action));
+        await sendFn(confirmationPrompt(action));
         return;
       }
 
@@ -176,7 +276,7 @@ async function createClient(): Promise<void> {
             action = { type: 'update', demandId: target.id, fields: { priority: classification.priority, summary: mergedSummary } };
           }
           setPendingAction(senderNumber, action);
-          await msg.reply(confirmationPrompt(action));
+          await sendFn(confirmationPrompt(action));
           return;
         }
       }
@@ -193,7 +293,7 @@ async function createClient(): Promise<void> {
             demandSummary: target.summary
           };
           setPendingAction(senderNumber, action);
-          await msg.reply(confirmationPrompt(action));
+          await sendFn(confirmationPrompt(action));
           return;
         }
       }
@@ -257,12 +357,7 @@ async function createClient(): Promise<void> {
       addTurn(senderNumber, 'assistant', response);
 
       console.log(`🤖 Resposta: ${response}\n`);
-      try {
-        await msg.reply(response);
-      } catch (err) {
-        console.warn('⚠️ msg.reply falhou, enviando sem citação:', err);
-        await client.sendMessage(msg.from, response);
-      }
+      await sendFn(response);
     } finally {
       clearInterval(typingInterval);
     }

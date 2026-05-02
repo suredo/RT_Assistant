@@ -212,6 +212,90 @@ describe('classify()', () => {
   });
 });
 
+describe('classify() — workflow intents', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('classifies trigger_workflow with workflowId and workflowVariables', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'trigger_workflow',
+      category: 'rotina',
+      priority: 'low',
+      summary: 'Onboarding de Frank',
+      demandIndex: null,
+      resolved: false,
+      queryFilters: null,
+      note: null,
+      workflowId: 'wf-uuid-123',
+      workflowVariables: { name: 'Frank' }
+    }));
+
+    const result = await classify('Frank foi contratado');
+
+    expect(result.type).toBe('trigger_workflow');
+    expect(result.workflowId).toBe('wf-uuid-123');
+    expect(result.workflowVariables).toEqual({ name: 'Frank' });
+  });
+
+  test('classifies manage_workflows with null workflowId and workflowVariables', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'manage_workflows',
+      category: 'rotina',
+      priority: 'low',
+      summary: 'Listar workflows',
+      demandIndex: null,
+      resolved: false,
+      queryFilters: null,
+      note: null,
+      workflowId: null,
+      workflowVariables: null
+    }));
+
+    const result = await classify('quais workflows estão ativos?');
+
+    expect(result.type).toBe('manage_workflows');
+    expect(result.workflowId).toBeNull();
+    expect(result.workflowVariables).toBeNull();
+  });
+
+  test('FALLBACK has workflowId and workflowVariables as null', async () => {
+    mockChat.mockResolvedValue('texto inválido sem json');
+
+    const result = await classify('mensagem qualquer');
+
+    expect(result.workflowId).toBeNull();
+    expect(result.workflowVariables).toBeNull();
+  });
+
+  test('sets workflowId to null for non-trigger_workflow types', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'new_demand', category: 'rotina', priority: 'low', summary: 'Demanda',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: 'wf-should-be-ignored', workflowVariables: { key: 'val' }
+    }));
+
+    const result = await classify('falta papel na impressora');
+
+    expect(result.workflowId).toBeNull();
+    expect(result.workflowVariables).toBeNull();
+  });
+
+  test('injects active workflows into classify prompt', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'trigger_workflow', category: 'rotina', priority: 'low', summary: 'Onboarding',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: 'wf-1', workflowVariables: { name: 'Ana' }
+    }));
+
+    const workflows = [{ id: 'wf-1', name: 'Onboarding', description: 'Quando alguém é contratado' }];
+    const result = await classify('Ana foi contratada', workflows);
+
+    expect(result.type).toBe('trigger_workflow');
+    expect(mockChat).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ role: 'system', content: expect.stringContaining('wf-1') })
+    ]));
+  });
+});
+
 describe('mergeSummary()', () => {
   beforeEach(() => jest.clearAllMocks());
 

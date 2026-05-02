@@ -42,6 +42,11 @@ npm run test:watch  # watch mode during development
 | `src/audio/transcribe.ts` | `tests/transcribe.test.ts` |
 | `src/db/botState.ts` | `tests/botState.test.ts` |
 | `src/sync.ts` | `tests/sync.test.ts` |
+| `src/db/workflows.ts` | `tests/workflows-db.test.ts` |
+| `src/workflows/interpolate.ts` | `tests/interpolate.test.ts` |
+| `src/workflows/engine.ts` | `tests/engine.test.ts` |
+| `src/workflows/manager.ts` | `tests/manager.test.ts` |
+| `src/workflows/notifications.ts` | `tests/notifications.test.ts` |
 
 ### What to test
 - All code paths in pure functions (happy path + error/edge cases)
