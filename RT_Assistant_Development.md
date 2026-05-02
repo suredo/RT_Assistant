@@ -1906,4 +1906,58 @@ Bot: "✅ Demanda criada. Não esqueça de solicitar os documentos de Frank."
 
 ---
 
+## 19. Future Work
+
+### 19.1 Local Development Mode (SQLite backend)
+
+**Status: Planned**
+
+Currently the bot always connects to Supabase, which means every local test or feature experiment touches the production database. A local mode would let you run the full bot against a SQLite file, develop and test features in isolation, and only push to Supabase when confident.
+
+#### How it works
+
+A `DB_BACKEND` environment variable switches the database layer at startup:
+
+```
+DB_BACKEND=local    # SQLite, persists to local.db — for development and manual testing
+DB_BACKEND=supabase # default — production Supabase
+```
+
+A thin `src/db/index.ts` re-exports all DB functions from the right backend:
+
+```typescript
+// src/db/index.ts
+if (process.env.DB_BACKEND === 'local') {
+  module.exports = require('./local');   // SQLite implementation
+} else {
+  module.exports = {
+    ...require('./supabase'),            // demand functions
+    ...require('./workflows'),           // workflow functions
+  };
+}
+```
+
+All source files import from `'../db'` instead of `'../db/supabase'` or `'../db/workflows'` directly. The `tests/e2e/helpers/testDb.ts` SQLite implementation already exists and would be promoted to `src/db/local.ts`.
+
+#### What this enables
+
+- `npm run start:local` — boots the full bot against `local.db`, no Supabase needed
+- Inspect state at any time with DB Browser for SQLite or the SQLite CLI
+- Reset the database by deleting `local.db`
+- Test schema changes, new step types, and workflow logic without risk to production data
+- Share a `local.db` snapshot to reproduce a specific bot state for debugging
+
+#### Implementation plan
+
+1. Move `tests/e2e/helpers/testDb.ts` → `src/db/local.ts`; update e2e tests to import from the new path
+2. Create `src/db/index.ts` with the backend switch
+3. Replace all `from '../db/supabase'` and `from '../db/workflows'` imports across `src/` with `from '../db'`
+4. Add `DB_BACKEND` to `.env.example` and the env var table in Section 5
+5. Add `"start:local": "DB_BACKEND=local ts-node src/index.ts"` to `package.json` scripts
+6. Update unit tests — they mock individual modules (`../db/supabase`, `../db/workflows`); after the refactor they mock `../db` instead
+
+No behavior changes in production — when `DB_BACKEND` is unset, everything works exactly as today.
+
+---
+
 *Living document — update as decisions are made.*
