@@ -176,6 +176,7 @@ async function createClient(): Promise<void> {
 
     // Shared send helper — prefer msg.reply (keeps thread), fall back to sendMessage
     const sendFn = async (content: string) => {
+      console.log(`🤖 Resposta: ${content}\n`);
       try {
         await msg.reply(content);
       } catch {
@@ -406,7 +407,6 @@ async function createClient(): Promise<void> {
       addTurn(senderNumber, 'user', msg.body);
       addTurn(senderNumber, 'assistant', response);
 
-      console.log(`🤖 Resposta: ${response}\n`);
       await sendFn(response);
     } finally {
       clearInterval(typingInterval);
