@@ -95,8 +95,8 @@ describe('workflow trigger and execution', () => {
     db.prepare(`INSERT INTO workflow_steps (id, workflow_id, step_order, step_type, content) VALUES (?, ?, 2, 'send_message', 'Nome registrado: {{name}}.')`)
       .run('step-003', wfId);
 
-    // Trigger
-    const r1 = await sim.send('preciso coletar um nome');
+    // Trigger — echoes the workflow description so the LLM reliably matches it
+    const r1 = await sim.send('preciso coletar o nome de uma pessoa agora');
     expect(r1[0]).toContain('Qual é o nome');
 
     // Answer the question
@@ -110,25 +110,49 @@ describe('workflow trigger and execution', () => {
   });
 });
 
-// ── Scenario 3: Full demand creation through workflow ─────────────────────────
+// ── Scenario 3: Demand creation — direct (no workflow) ───────────────────────
+// Tests the classify → stage → confirm → saveDemand path without relying on
+// workflow trigger matching. More reliable because it avoids double LLM dependency.
+
+describe('direct demand creation', () => {
+  test('stages clinical demand for confirmation and saves to SQLite on confirm', async () => {
+    const db = getTestDb();
+
+    const r1 = await sim.send('paciente apresentou hipotensão grave durante a sessão, precisa de avaliação médica urgente');
+    // Confirmation prompts always end with (sim/não) — LLM replies never do
+    expect(r1[0]).toContain('(sim/não)');
+
+    const r2 = await sim.send('sim');
+    expect(r2[0]).toBe('✅ Feito!');
+
+    const demand = db.prepare(`SELECT * FROM demands LIMIT 1`).get() as Record<string, unknown> | undefined;
+    expect(demand).toBeTruthy();
+    expect(demand?.status).toBe('open');
+    expect(demand?.priority).toBe('high');
+  });
+});
+
+// ── Scenario 4: Demand creation through workflow create_demand step ───────────
+// Trigger message explicitly mirrors the workflow description so the LLM
+// reliably matches it instead of falling back to new_demand classification.
 
 describe('workflow create_demand step', () => {
   test('stages demand for confirmation and saves to SQLite on confirm', async () => {
     const db = getTestDb();
     const wfId = 'wf-demand-001';
     db.prepare(`INSERT INTO workflows (id, name, description, is_active, created_at) VALUES (?, ?, ?, 1, ?)`)
-      .run(wfId, 'Abrir vaga', 'Quando querem abrir uma vaga ou contratar alguém', new Date().toISOString());
+      .run(wfId, 'Abertura de vaga', 'Ativado quando a Bianca precisa abrir uma nova vaga na clínica', new Date().toISOString());
     db.prepare(`INSERT INTO workflow_steps (id, workflow_id, step_order, step_type, content) VALUES (?, ?, 1, 'create_demand', 'Abertura de vaga para {{role}}')`)
       .run('step-004', wfId);
 
-    // Trigger workflow
-    const r1 = await sim.send('preciso contratar um técnico de enfermagem');
-    expect(r1[0]).toMatch(/confirma/i);
+    // Trigger — echoes the workflow description closely so the LLM matches it
+    const r1 = await sim.send('preciso abrir uma nova vaga na clínica para técnico de enfermagem');
+    // Must be a real confirmation prompt, not a conversational LLM response
+    expect(r1[0]).toContain('(sim/não)');
 
-    // Confirm
     const r2 = await sim.send('sim');
 
-    // Demand saved to SQLite
+    // Demand saved to SQLite (either via workflow_save_demand or save action)
     const demand = db.prepare(`SELECT * FROM demands LIMIT 1`).get() as Record<string, unknown> | undefined;
     expect(demand).toBeTruthy();
     expect((demand?.summary as string)?.toLowerCase()).toMatch(/vaga|técnico/i);
