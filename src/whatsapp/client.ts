@@ -30,7 +30,10 @@ function confirmationPrompt(action: PendingAction): string {
   if (action.type === 'add_note') {
     return `📝 Vou adicionar esta nota à demanda "${action.demandSummary}":\n${action.formattedNote}\n\nConfirma? (sim/não)`;
   }
-  return `✅ Vou marcar como resolvida:\n${formatDemand({ priority: action.demandPriority, summary: action.demandSummary })}\n\nConfirma? (sim/não)`;
+  if (action.type === 'resolve') {
+    return `✅ Vou marcar como resolvida:\n${formatDemand({ priority: action.demandPriority, summary: action.demandSummary })}\n\nConfirma? (sim/não)`;
+  }
+  return 'Confirma? (sim/não)';
 }
 
 async function executePendingAction(action: PendingAction, sender: string, sendFn: (content: string) => Promise<void>): Promise<void> {
@@ -87,6 +90,18 @@ async function handleStepResult(
   } else if (result.action === 'error') {
     await sendFn(`⚠️ ${result.message}`);
   }
+}
+
+// Returns true when a message unambiguously intends to manage workflows,
+// regardless of what else the message contains (e.g. "criar uma demanda" inside
+// a workflow definition). This bypasses the LLM classifier for these cases.
+function isWorkflowManagementMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (!lower.includes('workflow')) return false;
+  const managementVerbs = ['cria', 'crie', 'criar', 'lista', 'liste', 'listar', 'edita', 'edite', 'editar',
+    'atualiza', 'atualize', 'atualizar', 'ativa', 'ative', 'ativar', 'desativa', 'desative', 'desativar',
+    'apaga', 'apague', 'apagar', 'deleta', 'delete', 'deletar', 'mostra', 'mostre', 'mostrar'];
+  return managementVerbs.some(verb => lower.includes(verb));
 }
 
 async function createClient(): Promise<void> {
@@ -237,6 +252,20 @@ async function createClient(): Promise<void> {
       try {
         activeWorkflows = await getActiveWorkflows();
       } catch { /* non-critical — classifier falls back to base prompt */ }
+
+      // ── Keyword pre-check for workflow management ─────────────────────────
+      // GLM-4 misclassifies long workflow-management messages that contain
+      // demand-related phrases. Bypass the classifier for unambiguous cases.
+      if (isWorkflowManagementMessage(msg.body)) {
+        try {
+          const response = await handleManageWorkflows(msg.body);
+          await sendFn(response);
+        } catch (err) {
+          console.error('⚠️ Erro ao gerenciar workflow:', err);
+          await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
+        }
+        return;
+      }
 
       // ── Classify ───────────────────────────────────────────────────────────
       const classification = await classify(msg.body, activeWorkflows);

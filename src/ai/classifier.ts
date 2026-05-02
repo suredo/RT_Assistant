@@ -50,7 +50,13 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
 - workflowVariables: quando type é "trigger_workflow", um objeto com as variáveis extraídas da mensagem (ex: {"name": "Frank"}); null para outros tipos.
 
 Use type "add_note" quando a mensagem pede para registrar uma observação, andamento ou nota em uma demanda existente.
-Use type "manage_workflows" quando a mensagem pede para criar, listar, editar ou excluir workflows ou templates.
+
+Use type "manage_workflows" quando a mensagem menciona a palavra "workflow" junto com intenção de gerenciamento — criar, listar, editar, ativar, desativar ou apagar. IMPORTANTE: mesmo que a mensagem também mencione "criar uma demanda" ou "criar uma notificação" como parte da DEFINIÇÃO dos passos do workflow, o tipo DEVE ser "manage_workflows", não "new_demand". Exemplos que são "manage_workflows":
+  - "crie um workflow chamado X com 1 passo: criar uma demanda de Y"
+  - "lista os workflows ativos"
+  - "edita o workflow X, muda o passo 1 para..."
+  - "desativa o workflow de contratação"
+
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
 
