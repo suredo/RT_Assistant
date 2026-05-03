@@ -419,3 +419,18 @@ describe('handleManageWorkflows() — fallback', () => {
     expect(immediateResponse(result)).toContain('⚠️');
   });
 });
+
+describe('manager prompt — send_message constraint', () => {
+  test('prompt instructs LLM that send_message delivers only to RT, not third parties', async () => {
+    // The constraint must be present in the prompt so the LLM never frames
+    // send_message as an outbound send to HR, doctors, or other parties.
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'unknown' }));
+
+    await handleManageWorkflows('crie um workflow para enviar email ao RH');
+
+    const systemMsg = (mockChat.mock.calls[0][0] as Array<{ role: string; content: string }>)
+      .find(m => m.role === 'system');
+    expect(systemMsg?.content).toContain('NÃO envia para terceiros');
+    expect(systemMsg?.content).toContain('Rascunho para encaminhar');
+  });
+});

@@ -36,7 +36,7 @@ const FALLBACK_CMD: ManageCommand = { operation: 'unknown' };
 // ── LLM prompt ─────────────────────────────────────────────────────────────────
 
 const STEP_TYPES =
-  '"send_message" (envia uma mensagem ou template ao usuário — use para qualquer conteúdo fixo ou template com variáveis), ' +
+  '"send_message" (entrega uma mensagem ou template SOMENTE para a própria RT no WhatsApp — o bot NÃO envia para terceiros como RH, médicos ou fornecedores; quando o conteúdo é um rascunho para ser encaminhado, abra com "📋 Rascunho para encaminhar ao [destino] — revise antes de enviar:"), ' +
   '"ask_question" (faz uma pergunta e captura a resposta em {{variavel}} — use APENAS quando precisar de informação não disponível na mensagem original), ' +
   '"create_demand" (cria uma demanda após confirmação do usuário), ' +
   '"create_notification" (cria uma notificação após confirmação do usuário)';
@@ -58,6 +58,7 @@ REGRAS IMPORTANTES PARA STEPS:
 - NÃO use múltiplos ask_question para preencher um template. Em vez disso, use ask_question somente para informações realmente necessárias não mencionadas na mensagem, e depois um send_message com o template completo usando {{variavel}}.
 - Use "ask_question" com moderação — apenas quando a informação é realmente necessária e não foi fornecida na mensagem original.
 - Um workflow de "enviar mensagem para o RH sobre nova contratação" deve ter: ask_question apenas para dados não fornecidos + send_message com o template da mensagem para o RH.
+- IMPORTANTE: o bot não envia mensagens para terceiros. Quando o destino final é outra pessoa (RH, médico, fornecedor, direção), o send_message entrega um rascunho para a RT revisar e encaminhar manualmente. Sempre deixe isso explícito no início do content: "📋 Rascunho para encaminhar ao [destino] — revise antes de enviar:".
 
 Use "list" para listar/ver os workflows cadastrados.
 Use "toggle" para ativar ou desativar um workflow existente.
