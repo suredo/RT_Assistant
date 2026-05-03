@@ -294,6 +294,44 @@ describe('classify() — workflow intents', () => {
       expect.objectContaining({ role: 'system', content: expect.stringContaining('wf-1') })
     ]));
   });
+
+  test('classifies suggest_workflow with demand fields populated', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'suggest_workflow',
+      category: 'gestão de equipe',
+      priority: 'medium',
+      summary: 'Abertura de vaga para estagiário',
+      demandIndex: null,
+      resolved: false,
+      queryFilters: null,
+      note: null,
+      workflowId: null,
+      workflowVariables: null,
+    }));
+
+    const result = await classify('Abrir vaga para estagiário');
+
+    expect(result.type).toBe('suggest_workflow');
+    expect(result.category).toBe('gestão de equipe');
+    expect(result.priority).toBe('medium');
+    expect(result.summary).toBe('Abertura de vaga para estagiário');
+    expect(result.workflowId).toBeNull();
+    expect(result.workflowVariables).toBeNull();
+  });
+
+  test('suggest_workflow prompt includes the suggest_workflow type', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'new_demand', category: 'rotina', priority: 'low', summary: 'x',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+    }));
+
+    await classify('Abrir vaga para técnico');
+
+    expect(mockChat).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ role: 'system', content: expect.stringContaining('suggest_workflow') })
+    ]));
+  });
 });
 
 describe('mergeSummary()', () => {
