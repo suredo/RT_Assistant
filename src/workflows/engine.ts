@@ -1,6 +1,7 @@
 import {
   getWorkflowSteps,
   getInstanceById,
+  getActiveInstance,
   createInstance,
   advanceInstance,
   completeInstance,
@@ -126,4 +127,24 @@ export async function answerQuestion(instanceId: string, answer: string): Promis
 export async function cancelWorkflow(instanceId: string): Promise<StepResult> {
   await cancelInstance(instanceId);
   return { action: 'workflow_cancelled' };
+}
+
+/**
+ * Safe lazy-rehydration helper: returns an active instance only when it is
+ * genuinely paused waiting for a user answer (current step is ask_question
+ * with a variable_name).  Instances stuck at send_message, create_demand, or
+ * create_notification — e.g. left over from a previous bot session — are
+ * silently ignored so they do not hijack unrelated messages.
+ */
+export async function getResumableInstance(sender: string): Promise<WorkflowInstance | null> {
+  const instance = await getActiveInstance(sender);
+  if (!instance) return null;
+
+  const steps = await getWorkflowSteps(instance.workflow_id);
+  const currentStep = steps.find(s => s.step_order === instance.current_step_order);
+
+  if (currentStep?.step_type === 'ask_question' && currentStep.variable_name) {
+    return instance;
+  }
+  return null;
 }
