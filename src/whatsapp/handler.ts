@@ -19,7 +19,7 @@ import {
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { getActiveWorkflows, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance, StepResult } from '../workflows/engine';
-import { handleManageWorkflows, executeManageCommand } from '../workflows/manager';
+import { handleManageWorkflows, executeManageCommand, modifyManageCommand, ManageCommand } from '../workflows/manager';
 import { formatDemand, noteTimestamp } from '../format';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -230,6 +230,35 @@ export async function handleMessage(
       await sendFn('Cancelado. Como posso ajudar?');
       return;
     }
+    // Workflow in-preview modification: user is tweaking before confirming
+    if (pending.type === 'workflow_create' || pending.type === 'workflow_edit') {
+      const existingCmd: ManageCommand = {
+        operation: pending.type === 'workflow_create' ? 'create' : 'edit',
+        name: pending.workflowName,
+        description: pending.description,
+        steps: pending.steps,
+      };
+      try {
+        const result = await modifyManageCommand(body, existingCmd);
+        if (result.type === 'preview') {
+          const newAction: PendingAction =
+            existingCmd.operation === 'create'
+              ? { type: 'workflow_create', workflowName: result.cmd.name!, description: result.cmd.description!, steps: result.cmd.steps! }
+              : { type: 'workflow_edit', workflowName: result.cmd.name!, steps: result.cmd.steps!, description: result.cmd.description };
+          setPendingAction(senderNumber, newAction);
+          await sendFn(result.preview);
+        } else {
+          clearPendingAction(senderNumber);
+          await sendFn(result.response);
+        }
+      } catch (err) {
+        console.error('⚠️ Erro ao modificar workflow:', err);
+        clearPendingAction(senderNumber);
+        await sendFn('⚠️ Erro ao processar a modificação. Tente novamente.');
+      }
+      return;
+    }
+
     // Unrelated message — clear pending and process normally
     clearPendingAction(senderNumber);
   }

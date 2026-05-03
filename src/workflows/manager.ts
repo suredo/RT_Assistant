@@ -187,6 +187,43 @@ export async function executeManageCommand(cmd: ManageCommand): Promise<string> 
   return '⚠️ Operação inválida.';
 }
 
+// ── Modification helper ────────────────────────────────────────────────────────
+
+/**
+ * Apply a free-text modification request to an already-staged ManageCommand.
+ * Called when the user sends a tweak message instead of sim/não after a preview.
+ * Reuses parseCommand (same MANAGER_PROMPT rules) with the current workflow
+ * definition prepended as context so the LLM knows what it's modifying.
+ */
+export async function modifyManageCommand(
+  message: string,
+  existingCmd: ManageCommand
+): Promise<ManageResult> {
+  const stepsText = (existingCmd.steps ?? [])
+    .map(s => `  ${s.step_order}. ${s.step_type}: ${s.content}${s.variable_name ? ` → {{${s.variable_name}}}` : ''}`)
+    .join('\n');
+  const contextMessage =
+    `[Workflow em revisão]\n` +
+    `Nome: "${existingCmd.name}"\n` +
+    `Gatilho: "${existingCmd.description ?? ''}"\n` +
+    `Passos:\n${stepsText}\n\n` +
+    `[Pedido de modificação]\n${message}`;
+
+  const cmd = await parseCommand(contextMessage);
+  cmd.operation = existingCmd.operation; // preserve original — don't let LLM flip create↔edit
+
+  if (cmd.operation === 'create' && cmd.name && cmd.description && cmd.steps?.length) {
+    return { type: 'preview', preview: formatWorkflowPreview(cmd), cmd };
+  }
+  if (cmd.operation === 'edit' && cmd.name && cmd.steps?.length) {
+    return { type: 'preview', preview: formatWorkflowPreview(cmd), cmd };
+  }
+  return {
+    type: 'immediate',
+    response: '⚠️ Não consegui aplicar a modificação. Tente descrever a mudança com mais detalhes.'
+  };
+}
+
 // ── Public handler ─────────────────────────────────────────────────────────────
 
 export async function handleManageWorkflows(message: string): Promise<ManageResult> {
