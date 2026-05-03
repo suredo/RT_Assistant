@@ -1,6 +1,7 @@
 jest.mock('../src/db/workflows', () => ({
   getWorkflowSteps: jest.fn(),
   getInstanceById: jest.fn(),
+  getActiveInstance: jest.fn(),
   createInstance: jest.fn(),
   advanceInstance: jest.fn(),
   completeInstance: jest.fn(),
@@ -20,18 +21,19 @@ jest.mock('../src/format', () => ({
 }));
 
 import {
-  triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow,
+  triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance,
 } from '../src/workflows/engine';
 import {
-  getWorkflowSteps, getInstanceById, createInstance,
+  getWorkflowSteps, getInstanceById, getActiveInstance, createInstance,
   advanceInstance, completeInstance, cancelInstance,
 } from '../src/db/workflows';
 import { interpolate } from '../src/workflows/interpolate';
 import { classify } from '../src/ai/classifier';
 import { formatDemand } from '../src/format';
 
-const mockGetSteps      = jest.mocked(getWorkflowSteps);
-const mockGetInstance   = jest.mocked(getInstanceById);
+const mockGetSteps       = jest.mocked(getWorkflowSteps);
+const mockGetInstance    = jest.mocked(getInstanceById);
+const mockGetActive      = jest.mocked(getActiveInstance);
 const mockCreate        = jest.mocked(createInstance);
 const mockAdvance       = jest.mocked(advanceInstance);
 const mockComplete      = jest.mocked(completeInstance);
@@ -386,5 +388,58 @@ describe('cancelWorkflow()', () => {
 
     expect(mockCancel).toHaveBeenCalledWith('inst-1');
     expect(result.action).toBe('workflow_cancelled');
+  });
+});
+
+// ── getResumableInstance ───────────────────────────────────────────────────────
+
+describe('getResumableInstance()', () => {
+  const STEP_ASK_AT_1 = { ...STEP_ASK, step_order: 1 };
+
+  test('returns instance when current step is ask_question with variable_name', async () => {
+    mockGetActive.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_ASK_AT_1]);
+
+    const result = await getResumableInstance('5511999');
+
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe('inst-1');
+  });
+
+  test('returns null when no active instance', async () => {
+    mockGetActive.mockResolvedValue(null);
+
+    const result = await getResumableInstance('5511999');
+
+    expect(result).toBeNull();
+    expect(mockGetSteps).not.toHaveBeenCalled();
+  });
+
+  test('returns null when current step is send_message (stale instance)', async () => {
+    mockGetActive.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([{ ...STEP_SEND, step_order: 1 }]);
+
+    const result = await getResumableInstance('5511999');
+
+    expect(result).toBeNull();
+  });
+
+  test('returns null when current step is create_demand (stale confirmation)', async () => {
+    mockGetActive.mockResolvedValue(INSTANCE);
+    const demandStep = { id: 's1', workflow_id: 'wf-1', step_order: 1, step_type: 'create_demand', content: 'Registrar vaga' };
+    mockGetSteps.mockResolvedValue([demandStep]);
+
+    const result = await getResumableInstance('5511999');
+
+    expect(result).toBeNull();
+  });
+
+  test('returns null when ask_question step has no variable_name', async () => {
+    mockGetActive.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([{ ...STEP_ASK_AT_1, variable_name: undefined }]);
+
+    const result = await getResumableInstance('5511999');
+
+    expect(result).toBeNull();
   });
 });

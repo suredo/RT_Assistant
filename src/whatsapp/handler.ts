@@ -17,8 +17,8 @@ import {
   PendingAction
 } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
-import { getActiveWorkflows, getActiveInstance, createNotification } from '../db/workflows';
-import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, StepResult } from '../workflows/engine';
+import { getActiveWorkflows, createNotification } from '../db/workflows';
+import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance, StepResult } from '../workflows/engine';
 import { handleManageWorkflows, executeManageCommand } from '../workflows/manager';
 import { formatDemand, noteTimestamp } from '../format';
 
@@ -170,9 +170,9 @@ export async function handleMessage(
     const hasPending = !!getPendingAction(senderNumber);
     if (!hasPending) {
       try {
-        const activeInst = await getActiveInstance(senderNumber);
-        if (activeInst) {
-          activeInstanceId = activeInst.id;
+        const resumable = await getResumableInstance(senderNumber);
+        if (resumable) {
+          activeInstanceId = resumable.id;
           setActiveWorkflow(senderNumber, activeInstanceId);
         }
       } catch { /* non-critical */ }
