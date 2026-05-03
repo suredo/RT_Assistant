@@ -19,7 +19,7 @@ import {
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { getActiveWorkflows, getActiveInstance, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, StepResult } from '../workflows/engine';
-import { handleManageWorkflows } from '../workflows/manager';
+import { handleManageWorkflows, executeManageCommand } from '../workflows/manager';
 import { formatDemand, noteTimestamp } from '../format';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,6 +65,24 @@ async function executePendingAction(action: PendingAction, sender: string, sendF
       await handleStepResult(result, sender, sendFn);
       return;
     }
+  } else if (action.type === 'workflow_create') {
+    const response = await executeManageCommand({
+      operation: 'create',
+      name: action.workflowName,
+      description: action.description,
+      steps: action.steps,
+    });
+    await sendFn(response);
+    return;
+  } else if (action.type === 'workflow_edit') {
+    const response = await executeManageCommand({
+      operation: 'edit',
+      name: action.workflowName,
+      description: action.description,
+      steps: action.steps,
+    });
+    await sendFn(response);
+    return;
   }
 }
 
@@ -83,6 +101,11 @@ async function handleStepResult(
     setActiveWorkflow(sender, result.instanceId);
     await sendFn(result.prompt);
   } else if (result.action === 'confirm_demand' || result.action === 'confirm_notification') {
+    // Clear the in-memory active workflow: the workflow is now paused waiting for
+    // the user to confirm a demand/notification, not waiting for a question answer.
+    // Without this, the next message ('sim') would be routed to answerQuestion()
+    // instead of executePendingAction().
+    clearActiveWorkflow(sender);
     setPendingAction(sender, result.pendingAction);
     await sendFn(result.confirmPrompt);
   } else if (result.action === 'workflow_complete') {
@@ -94,6 +117,27 @@ async function handleStepResult(
   } else if (result.action === 'error') {
     await sendFn(`⚠️ ${result.message}`);
   }
+}
+
+// Handles the result of handleManageWorkflows() — either send the response
+// immediately or stage a pending confirmation for create/edit operations.
+async function dispatchManageResult(
+  body: string,
+  senderNumber: string,
+  sendFn: (content: string) => Promise<void>,
+): Promise<void> {
+  const result = await handleManageWorkflows(body);
+  if (result.type === 'immediate') {
+    await sendFn(result.response);
+    return;
+  }
+  // Preview — stage a pending action so 'sim'/'não' confirms or cancels
+  const action: import('../ai/context').PendingAction =
+    result.cmd.operation === 'create'
+      ? { type: 'workflow_create', workflowName: result.cmd.name!, description: result.cmd.description!, steps: result.cmd.steps! }
+      : { type: 'workflow_edit',   workflowName: result.cmd.name!, steps: result.cmd.steps!, description: result.cmd.description };
+  setPendingAction(senderNumber, action);
+  await sendFn(result.preview);
 }
 
 // Returns true when a message unambiguously intends to manage workflows,
@@ -154,7 +198,7 @@ export async function handleMessage(
         await executePendingAction(pending, senderNumber, sendFn);
         clearPendingAction(senderNumber);
         clearHistory(senderNumber);
-        const workflowTypes = ['advance_workflow', 'workflow_save_demand', 'create_notification'];
+        const workflowTypes = ['advance_workflow', 'workflow_save_demand', 'create_notification', 'workflow_create', 'workflow_edit'];
         if (!workflowTypes.includes(pending.type)) {
           await sendFn('✅ Feito!');
         }
@@ -193,8 +237,7 @@ export async function handleMessage(
   // ── Keyword pre-check for workflow management ─────────────────────────────
   if (isWorkflowManagementMessage(body)) {
     try {
-      const response = await handleManageWorkflows(body);
-      await sendFn(response);
+      await dispatchManageResult(body, senderNumber, sendFn);
     } catch (err) {
       console.error('⚠️ Erro ao gerenciar workflow:', err);
       await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
@@ -220,8 +263,7 @@ export async function handleMessage(
   // ── Manage workflows ──────────────────────────────────────────────────────
   if (classification.type === 'manage_workflows') {
     try {
-      const response = await handleManageWorkflows(body);
-      await sendFn(response);
+      await dispatchManageResult(body, senderNumber, sendFn);
     } catch (err) {
       console.error('⚠️ Erro ao gerenciar workflow:', err);
       await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');

@@ -18,6 +18,13 @@ export function addTurn(sender: string, role: 'user' | 'assistant', content: str
 
 // ── Pending action store ─────────────────────────────────────────────────────
 
+export interface WorkflowStepDef {
+  step_order: number;
+  step_type: string;
+  content: string;
+  variable_name?: string;
+}
+
 export type PendingAction =
   | { type: 'save'; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'update'; demandId: string; fields: { priority: string; summary: string } }
@@ -25,7 +32,9 @@ export type PendingAction =
   | { type: 'add_note'; demandId: string; existingNotes: string | undefined; formattedNote: string; demandSummary: string }
   | { type: 'advance_workflow'; instanceId: string; stepSummary: string }
   | { type: 'workflow_save_demand'; instanceId: string; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
-  | { type: 'create_notification'; instanceId: string | null; recipient: string; content: string; scheduledAt?: string; cronExpr?: string; notificationSummary: string };
+  | { type: 'create_notification'; instanceId: string | null; recipient: string; content: string; scheduledAt?: string; cronExpr?: string; notificationSummary: string }
+  | { type: 'workflow_create'; workflowName: string; description: string; steps: WorkflowStepDef[] }
+  | { type: 'workflow_edit'; workflowName: string; steps: WorkflowStepDef[]; description?: string };
 
 const pendingActions = new Map<string, PendingAction>();
 

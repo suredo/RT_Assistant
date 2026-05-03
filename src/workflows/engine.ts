@@ -41,6 +41,13 @@ async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
     if (!step.variable_name) {
       return { action: 'error', message: `Passo ${step.step_order} do tipo ask_question não tem variable_name definido.` };
     }
+    // Auto-skip: the variable was already captured from the trigger message —
+    // no need to ask the user for information they already provided.
+    if (vars[step.variable_name] !== undefined) {
+      const nextOrder = instance.current_step_order + 1;
+      await advanceInstance(instance.id, nextOrder, vars);
+      return executeStep({ ...instance, current_step_order: nextOrder, variables: vars });
+    }
     return { action: 'ask_question', prompt: content, variableName: step.variable_name, instanceId: instance.id };
   }
 

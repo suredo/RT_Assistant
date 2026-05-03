@@ -259,6 +259,28 @@ describe('answerQuestion()', () => {
     }
   });
 
+  test('auto-skips ask_question when variable already known', async () => {
+    // Instance already has 'role' set from the trigger message variables
+    const instanceWithRole = { ...INSTANCE, variables: { name: 'Frank', role: 'Técnico de Enfermagem' }, current_step_order: 1 };
+    const askStep1 = { ...STEP_ASK, step_order: 1 };
+    const sendStep2 = { ...STEP_SEND, step_order: 2 };
+    mockGetInstance.mockResolvedValue(instanceWithRole);
+    mockGetSteps.mockResolvedValue([askStep1, sendStep2]);
+    mockAdvance.mockResolvedValue(undefined);
+
+    // Trigger via triggerWorkflow to test executeStep's auto-skip path
+    mockCreate.mockResolvedValue(instanceWithRole);
+    const result = await triggerWorkflow('wf-1', '5511999', { name: 'Frank', role: 'Técnico de Enfermagem' });
+
+    // Should skip the ask_question (role is known) and move to send_message
+    expect(result.action).toBe('send_message');
+    expect(mockAdvance).toHaveBeenCalledWith(
+      instanceWithRole.id,
+      2,
+      expect.objectContaining({ role: 'Técnico de Enfermagem' }),
+    );
+  });
+
   test('returns error when instance not found', async () => {
     mockGetInstance.mockResolvedValue(null);
 

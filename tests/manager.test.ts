@@ -8,7 +8,7 @@ jest.mock('../src/db/workflows', () => ({
   deleteWorkflowSteps: jest.fn(),
 }));
 
-import { handleManageWorkflows, formatWorkflowList } from '../src/workflows/manager';
+import { handleManageWorkflows, executeManageCommand, formatWorkflowList, ManageResult } from '../src/workflows/manager';
 import { chat } from '../src/ai/glm';
 import {
   getAllWorkflows, createWorkflow, updateWorkflow,
@@ -29,6 +29,12 @@ const STEPS_DEF = [
   { step_order: 1, step_type: 'send_message', content: 'Bem-vindo, {{name}}!' },
   { step_order: 2, step_type: 'ask_question', content: 'Qual o cargo de {{name}}?', variable_name: 'role' },
 ];
+
+// Helper: extracts the response string from an 'immediate' result, throws otherwise
+function immediateResponse(result: ManageResult): string {
+  if (result.type !== 'immediate') throw new Error(`Expected immediate, got ${result.type}`);
+  return result.response;
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -73,10 +79,12 @@ describe('handleManageWorkflows() — list', () => {
 
     const result = await handleManageWorkflows('quais workflows existem?');
 
-    expect(result).toContain('Onboarding');
-    expect(result).toContain('Offboarding');
-    expect(result).toContain('✅');
-    expect(result).toContain('⏸️');
+    expect(result.type).toBe('immediate');
+    const response = immediateResponse(result);
+    expect(response).toContain('Onboarding');
+    expect(response).toContain('Offboarding');
+    expect(response).toContain('✅');
+    expect(response).toContain('⏸️');
   });
 
   test('returns empty message when no workflows', async () => {
@@ -85,23 +93,98 @@ describe('handleManageWorkflows() — list', () => {
 
     const result = await handleManageWorkflows('lista workflows');
 
-    expect(result).toContain('Nenhum workflow');
+    expect(immediateResponse(result)).toContain('Nenhum workflow');
   });
 });
 
-// ── create ─────────────────────────────────────────────────────────────────────
+// ── create — handleManageWorkflows returns preview ─────────────────────────────
 
 describe('handleManageWorkflows() — create', () => {
-  test('creates workflow and all steps, returns success message', async () => {
+  test('returns preview for valid create command (no DB write yet)', async () => {
     mockChat.mockResolvedValue(JSON.stringify({
       operation: 'create',
       name: 'Onboarding',
       description: 'Quando alguém é contratado',
       steps: STEPS_DEF,
     }));
-    mockCreate.mockResolvedValue(WF_ACTIVE);
 
     const result = await handleManageWorkflows('cria workflow de onboarding');
+
+    expect(result.type).toBe('preview');
+    if (result.type === 'preview') {
+      expect(result.preview).toContain('Onboarding');
+      expect(result.preview).toContain('Quando alguém é contratado');
+      expect(result.preview).toContain('sim/não');
+      expect(result.cmd.operation).toBe('create');
+      expect(result.cmd.name).toBe('Onboarding');
+      expect(result.cmd.steps).toHaveLength(2);
+    }
+    // DB must NOT be touched until user confirms
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockCreateStep).not.toHaveBeenCalled();
+  });
+
+  test('preview lists all steps with human-readable labels', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Test',
+      description: 'Gatilho',
+      steps: STEPS_DEF,
+    }));
+
+    const result = await handleManageWorkflows('cria workflow test');
+
+    if (result.type === 'preview') {
+      expect(result.preview).toContain('Enviar mensagem');  // send_message label
+      expect(result.preview).toContain('Perguntar');        // ask_question label
+      expect(result.preview).toContain('Bem-vindo');        // step content
+      expect(result.preview).toContain('{{role}}');         // captured variable
+    }
+  });
+
+  test('returns immediate error when name is missing', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', description: 'Gatilho', steps: STEPS_DEF }));
+
+    const result = await handleManageWorkflows('cria workflow');
+
+    expect(result.type).toBe('immediate');
+    expect(immediateResponse(result)).toContain('⚠️');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('returns immediate error when description is missing', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', name: 'Test', steps: STEPS_DEF }));
+
+    const result = await handleManageWorkflows('cria workflow test');
+
+    expect(result.type).toBe('immediate');
+    expect(immediateResponse(result)).toContain('⚠️');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('returns immediate error when steps array is empty', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', name: 'Test', description: 'Desc', steps: [] }));
+
+    const result = await handleManageWorkflows('cria workflow vazio');
+
+    expect(result.type).toBe('immediate');
+    expect(immediateResponse(result)).toContain('⚠️');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+// ── create — executeManageCommand writes to DB ─────────────────────────────────
+
+describe('executeManageCommand() — create', () => {
+  test('creates workflow and all steps, returns success message', async () => {
+    mockCreate.mockResolvedValue(WF_ACTIVE);
+
+    const result = await executeManageCommand({
+      operation: 'create',
+      name: 'Onboarding',
+      description: 'Quando alguém é contratado',
+      steps: STEPS_DEF,
+    });
 
     expect(mockCreate).toHaveBeenCalledWith('Onboarding', 'Quando alguém é contratado');
     expect(mockCreateStep).toHaveBeenCalledTimes(2);
@@ -111,46 +194,25 @@ describe('handleManageWorkflows() — create', () => {
     expect(result).toContain('2 passos');
   });
 
-  test('returns error when name is missing', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', description: 'Gatilho', steps: STEPS_DEF }));
-
-    const result = await handleManageWorkflows('cria workflow');
-
-    expect(result).toContain('⚠️');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  test('returns error when description is missing', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', name: 'Test', steps: STEPS_DEF }));
-
-    const result = await handleManageWorkflows('cria workflow test');
-
-    expect(result).toContain('⚠️');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  test('returns error when steps array is empty', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({ operation: 'create', name: 'Test', description: 'Desc', steps: [] }));
-
-    const result = await handleManageWorkflows('cria workflow vazio');
-
-    expect(result).toContain('⚠️');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
   test('singular "passo" when only one step', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({
+    mockCreate.mockResolvedValue({ ...WF_ACTIVE, name: 'Simple' });
+
+    const result = await executeManageCommand({
       operation: 'create',
       name: 'Simple',
       description: 'Gatilho',
       steps: [STEPS_DEF[0]],
-    }));
-    mockCreate.mockResolvedValue({ ...WF_ACTIVE, name: 'Simple' });
-
-    const result = await handleManageWorkflows('cria workflow simples');
+    });
 
     expect(result).toContain('1 passo');
     expect(result).not.toContain('1 passos');
+  });
+
+  test('returns error when name is missing', async () => {
+    const result = await executeManageCommand({ operation: 'create', description: 'Gatilho', steps: STEPS_DEF });
+
+    expect(result).toContain('⚠️');
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -164,7 +226,7 @@ describe('handleManageWorkflows() — toggle', () => {
     const result = await handleManageWorkflows('desativa o workflow de onboarding');
 
     expect(mockUpdate).toHaveBeenCalledWith('w1', { is_active: false });
-    expect(result).toContain('desativado');
+    expect(immediateResponse(result)).toContain('desativado');
   });
 
   test('activates an existing workflow', async () => {
@@ -174,7 +236,7 @@ describe('handleManageWorkflows() — toggle', () => {
     const result = await handleManageWorkflows('ativa o workflow de offboarding');
 
     expect(mockUpdate).toHaveBeenCalledWith('w2', { is_active: true });
-    expect(result).toContain('ativado');
+    expect(immediateResponse(result)).toContain('ativado');
   });
 
   test('is case-insensitive when matching workflow name', async () => {
@@ -184,7 +246,7 @@ describe('handleManageWorkflows() — toggle', () => {
     const result = await handleManageWorkflows('desativa onboarding');
 
     expect(mockUpdate).toHaveBeenCalledWith('w1', { is_active: false });
-    expect(result).not.toContain('não encontrado');
+    expect(immediateResponse(result)).not.toContain('não encontrado');
   });
 
   test('returns error when workflow not found', async () => {
@@ -193,7 +255,7 @@ describe('handleManageWorkflows() — toggle', () => {
 
     const result = await handleManageWorkflows('desativa workflow inexistente');
 
-    expect(result).toContain('não encontrado');
+    expect(immediateResponse(result)).toContain('não encontrado');
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
@@ -202,20 +264,59 @@ describe('handleManageWorkflows() — toggle', () => {
 
     const result = await handleManageWorkflows('toggle onboarding');
 
-    expect(result).toContain('⚠️');
+    expect(immediateResponse(result)).toContain('⚠️');
   });
 });
 
-// ── edit ──────────────────────────────────────────────────────────────────────
+// ── edit — handleManageWorkflows returns preview ───────────────────────────────
 
 describe('handleManageWorkflows() — edit', () => {
   const NEW_STEPS = [{ step_order: 1, step_type: 'send_message', content: 'Novo passo' }];
 
-  test('deletes old steps and creates new ones', async () => {
+  test('returns preview for valid edit command (no DB write yet)', async () => {
     mockChat.mockResolvedValue(JSON.stringify({ operation: 'edit', name: 'Onboarding', steps: NEW_STEPS }));
     mockGetAll.mockResolvedValue([WF_ACTIVE]);
 
     const result = await handleManageWorkflows('edita onboarding com novo passo');
+
+    expect(result.type).toBe('preview');
+    if (result.type === 'preview') {
+      expect(result.preview).toContain('Onboarding');
+      expect(result.preview).toContain('sim/não');
+      expect(result.cmd.operation).toBe('edit');
+    }
+    expect(mockDeleteSteps).not.toHaveBeenCalled();
+    expect(mockCreateStep).not.toHaveBeenCalled();
+  });
+
+  test('returns immediate error when workflow not found', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'edit', name: 'Inexistente', steps: NEW_STEPS }));
+    mockGetAll.mockResolvedValue([]);
+
+    const result = await handleManageWorkflows('edita workflow inexistente');
+
+    expect(immediateResponse(result)).toContain('não encontrado');
+    expect(mockDeleteSteps).not.toHaveBeenCalled();
+  });
+
+  test('returns immediate error when steps are missing', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'edit', name: 'Onboarding' }));
+
+    const result = await handleManageWorkflows('edita onboarding');
+
+    expect(immediateResponse(result)).toContain('⚠️');
+  });
+});
+
+// ── edit — executeManageCommand writes to DB ───────────────────────────────────
+
+describe('executeManageCommand() — edit', () => {
+  const NEW_STEPS = [{ step_order: 1, step_type: 'send_message', content: 'Novo passo' }];
+
+  test('deletes old steps and creates new ones', async () => {
+    mockGetAll.mockResolvedValue([WF_ACTIVE]);
+
+    const result = await executeManageCommand({ operation: 'edit', name: 'Onboarding', steps: NEW_STEPS });
 
     expect(mockDeleteSteps).toHaveBeenCalledWith('w1');
     expect(mockCreateStep).toHaveBeenCalledTimes(1);
@@ -224,33 +325,20 @@ describe('handleManageWorkflows() — edit', () => {
   });
 
   test('also updates description when provided', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({
-      operation: 'edit', name: 'Onboarding',
-      description: 'Nova descrição', steps: NEW_STEPS,
-    }));
     mockGetAll.mockResolvedValue([WF_ACTIVE]);
 
-    await handleManageWorkflows('edita onboarding');
+    await executeManageCommand({ operation: 'edit', name: 'Onboarding', description: 'Nova descrição', steps: NEW_STEPS });
 
     expect(mockUpdate).toHaveBeenCalledWith('w1', { description: 'Nova descrição' });
   });
 
   test('returns error when workflow not found', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({ operation: 'edit', name: 'Inexistente', steps: NEW_STEPS }));
     mockGetAll.mockResolvedValue([]);
 
-    const result = await handleManageWorkflows('edita workflow inexistente');
+    const result = await executeManageCommand({ operation: 'edit', name: 'Inexistente', steps: NEW_STEPS });
 
     expect(result).toContain('não encontrado');
     expect(mockDeleteSteps).not.toHaveBeenCalled();
-  });
-
-  test('returns error when steps are missing', async () => {
-    mockChat.mockResolvedValue(JSON.stringify({ operation: 'edit', name: 'Onboarding' }));
-
-    const result = await handleManageWorkflows('edita onboarding');
-
-    expect(result).toContain('⚠️');
   });
 });
 
@@ -262,8 +350,8 @@ describe('handleManageWorkflows() — fallback', () => {
 
     const result = await handleManageWorkflows('faça algo aleatório');
 
-    expect(result).toContain('⚠️');
-    expect(result).toContain('listar');
+    expect(immediateResponse(result)).toContain('⚠️');
+    expect(immediateResponse(result)).toContain('listar');
   });
 
   test('returns fallback when LLM call throws', async () => {
@@ -271,7 +359,7 @@ describe('handleManageWorkflows() — fallback', () => {
 
     const result = await handleManageWorkflows('lista workflows');
 
-    expect(result).toContain('⚠️');
+    expect(immediateResponse(result)).toContain('⚠️');
   });
 
   test('returns fallback when LLM returns malformed JSON', async () => {
@@ -279,6 +367,6 @@ describe('handleManageWorkflows() — fallback', () => {
 
     const result = await handleManageWorkflows('lista workflows');
 
-    expect(result).toContain('⚠️');
+    expect(immediateResponse(result)).toContain('⚠️');
   });
 });
