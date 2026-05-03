@@ -34,7 +34,8 @@ export type PendingAction =
   | { type: 'workflow_save_demand'; instanceId: string; demand: { message: string; summary: string; category: string; priority: string }; messageId: string }
   | { type: 'create_notification'; instanceId: string | null; recipient: string; content: string; scheduledAt?: string; cronExpr?: string; notificationSummary: string }
   | { type: 'workflow_create'; workflowName: string; description: string; steps: WorkflowStepDef[] }
-  | { type: 'workflow_edit'; workflowName: string; steps: WorkflowStepDef[]; description?: string };
+  | { type: 'workflow_edit'; workflowName: string; steps: WorkflowStepDef[]; description?: string }
+  | { type: 'suggest_workflow'; originalMessage: string; demand: { message: string; summary: string; category: string; priority: string } };
 
 const pendingActions = new Map<string, PendingAction>();
 

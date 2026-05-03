@@ -65,6 +65,8 @@ async function executePendingAction(action: PendingAction, sender: string, sendF
       await handleStepResult(result, sender, sendFn);
       return;
     }
+  } else if (action.type === 'suggest_workflow') {
+    await saveDemand({ ...action.demand, whatsapp_message_id: '' });
   } else if (action.type === 'workflow_create') {
     const response = await executeManageCommand({
       operation: 'create',
@@ -193,6 +195,20 @@ export async function handleMessage(
   // ── Check for a pending confirmation ─────────────────────────────────────
   const pending = getPendingAction(senderNumber);
   if (pending) {
+    // Special case: the user chose to create a workflow instead of a demand
+    if (pending.type === 'suggest_workflow' && /^workflow\b/i.test(body.trim())) {
+      clearPendingAction(senderNumber);
+      clearHistory(senderNumber);
+      const hint = `Criar um workflow para o processo: "${pending.originalMessage}"`;
+      try {
+        await dispatchManageResult(hint, senderNumber, sendFn);
+      } catch (err) {
+        console.error('⚠️ Erro ao iniciar criação de workflow:', err);
+        await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
+      }
+      return;
+    }
+
     if (isConfirmation(body)) {
       try {
         await executePendingAction(pending, senderNumber, sendFn);
@@ -280,6 +296,24 @@ export async function handleMessage(
     };
     setPendingAction(senderNumber, action);
     await sendFn(confirmationPrompt(action));
+    return;
+  }
+
+  if (classification.type === 'suggest_workflow') {
+    const action: PendingAction = {
+      type: 'suggest_workflow',
+      originalMessage: body,
+      demand: { message: body, summary: classification.summary, category: classification.category, priority: classification.priority },
+    };
+    setPendingAction(senderNumber, action);
+    const demandPreview = formatDemand(action.demand, { showCategory: true });
+    await sendFn(
+      `Isso parece um processo recorrente! Como prefere tratar?\n\n` +
+      `📝 *Registrar como demanda* → responda *sim*\n` +
+      `⚙️ *Criar um workflow* para automatizar → responda *workflow*\n` +
+      `❌ *Cancelar* → responda *não*\n\n` +
+      `_Demanda que seria registrada:_\n${demandPreview}`
+    );
     return;
   }
 
