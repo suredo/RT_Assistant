@@ -240,6 +240,18 @@ export async function cancelInstance(instanceId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Cancel every active instance for a sender. Used by the REPL /reset command. */
+export async function cancelAllActiveInstances(sender: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('workflow_instances')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('sender', sender)
+    .eq('status', 'active')
+    .select('id');
+  if (error) throw error;
+  return data?.length ?? 0;
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 export async function createNotification(
