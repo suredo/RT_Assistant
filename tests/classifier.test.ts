@@ -334,6 +334,31 @@ describe('classify() — workflow intents', () => {
   });
 });
 
+describe('classify() — discuss intent', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('classifies discuss for a planning/opinion message', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'discuss',
+      category: 'rotina',
+      priority: 'low',
+      summary: 'RT quer discutir processo de admissão',
+      demandIndex: null,
+      resolved: false,
+      queryFilters: null,
+      note: null,
+      workflowId: null,
+      workflowVariables: null,
+    }));
+
+    const result = await classify('o que você acha de mudar o processo de admissão?');
+
+    expect(result.type).toBe('discuss');
+    expect(result.workflowId).toBeNull();
+    expect(result.queryFilters).toBeNull();
+  });
+});
+
 describe('mergeSummary()', () => {
   beforeEach(() => jest.clearAllMocks());
 

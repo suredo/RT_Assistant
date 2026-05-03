@@ -1829,12 +1829,12 @@ type StepResult =
 
 ### Implementation Slices
 
-#### Slice 1 — Foundation
-- [ ] DB migrations (run all 5 tables in Supabase)
-- [ ] `src/db/workflows.ts` — CRUD for all tables
-- [ ] `tests/workflows-db.test.ts`
-- [ ] `src/workflows/interpolate.ts` — `interpolate()`, `extractVariableNames()`, `missingVariables()`
-- [ ] `tests/interpolate.test.ts`
+#### Slice 1 — Foundation ✅
+- [x] DB migrations (run all 5 tables in Supabase)
+- [x] `src/db/workflows.ts` — CRUD for all tables
+- [x] `tests/workflows-db.test.ts`
+- [x] `src/workflows/interpolate.ts` — `interpolate()`, `extractVariableNames()`, `missingVariables()`
+- [x] `tests/interpolate.test.ts`
 
 No visible behavior change. Data layer and string utilities in place and tested.
 
@@ -1874,6 +1874,66 @@ She no longer needs Supabase access to manage workflows.
 - [x] `tests/notifications.test.ts` — 12 tests covering send, skip, error resilience, double-schedule guard, invalid cron, callback firing, job cleanup
 
 Scheduled and recurring notifications fire automatically. Feature complete.
+
+---
+
+### 18.6 Post-Slice Enhancements
+
+Features added after all 5 slices were complete, based on real REPL testing.
+
+#### Template Auto-Save
+
+When the workflow manager saves a workflow (create or edit), every `send_message` step's content is automatically upserted to the `message_templates` table via `upsertTemplate(name, content)` in `src/db/workflows.ts`. The step's `template_id` column is populated with the resulting template ID. This keeps message content reusable and auditable without requiring the user to manage templates separately.
+
+- Function: `upsertTemplate(name: string, content: string)` in `src/db/workflows.ts`
+- Uses Supabase `.upsert()` with `onConflict: 'name'` — safe to call multiple times
+- Template name is derived automatically as `"${workflowName} — step ${step_order}"`
+- Tested in `tests/workflows-db.test.ts` and `tests/manager.test.ts`
+
+#### System Variables
+
+The engine automatically injects three date/time variables into every step's interpolation context, before instance variables:
+
+| Placeholder | Value | Example |
+|---|---|---|
+| `{{data_atual}}` | Today's date in pt-BR | `02/05/2026` |
+| `{{hora_atual}}` | Current time HH:MM | `14:30` |
+| `{{data_hora_atual}}` | Date + time combined | `02/05/2026 14:30` |
+
+Timezone: `America/Sao_Paulo`. Instance variables (captured from trigger or `ask_question`) override system variables if the same key name is used. No configuration needed — any step can use these placeholders.
+
+#### `getResumableInstance()` — Safe Lazy Rehydration
+
+`src/workflows/engine.ts` exports `getResumableInstance(sender)` which replaces direct calls to `getActiveInstance` in the handler. It returns the active Supabase instance for a sender **only if** the current step is an `ask_question` step with a defined `variable_name`. Instances stuck at `send_message`, `create_demand`, or `create_notification` steps are ignored — this prevents the routing error "Passo atual não é uma pergunta com variável definida" when a stale instance exists in Supabase at a non-question step.
+
+```typescript
+// Safe — only returns instance ready for question answering
+export async function getResumableInstance(sender: string): Promise<WorkflowInstance | null>
+```
+
+#### `suggest_workflow` Intent
+
+The classifier fires `suggest_workflow` when a message describes a **recurring or process-type task** (e.g. "abrir vaga para estagiário", "integração de novo colaborador") **and no active workflow matches it**. This is distinct from `trigger_workflow` (which fires when a match exists).
+
+Handler behavior: stages a `suggest_workflow` PendingAction and presents a three-way choice to the RT:
+- **sim** → register as a regular demand (same flow as `new_demand`)
+- **workflow** → route the message into workflow creation (same flow as typing "crie um workflow para X")
+- **não** → cancel, no action taken
+
+The classifier prompt explicitly excludes urgent/one-off situations from this type: emergency patient issues, single purchases, equipment faults — those stay as `new_demand`.
+
+#### Auto-Skip Known Variables in `ask_question` Steps
+
+If a variable captured from the trigger message already satisfies an `ask_question` step's `variable_name`, the engine skips that step automatically and moves to the next one. This avoids redundant questions when the LLM already extracted the needed value.
+
+```
+Trigger: "Frank foi contratado"
+Engine: variable 'name' = 'Frank' — skip ask_question step "Qual o nome do novo funcionário?"
+```
+
+#### Updated `/reset` Behavior in REPL
+
+The REPL `/reset` command now cancels all active workflow instances for the sender in Supabase (via `cancelAllActiveInstances(sender)` in `src/db/workflows.ts`), in addition to clearing in-memory state (conversation history, pending actions, active workflow map). This ensures stale Supabase instances from previous REPL sessions don't interfere with new tests.
 
 ---
 
@@ -1927,7 +1987,8 @@ REPL_ROLE=team              # "rt" or "team" (default: "rt")
 
 Special commands inside the REPL:
 ```
-/reset   clear conversation history and all pending state for this sender
+/reset   clear conversation history and all pending state for this sender;
+         also cancels all active workflow instances for this sender in Supabase
 /quit    exit
 ```
 
@@ -1997,6 +2058,83 @@ All source files import from `'../db'` instead of `'../db/supabase'` or `'../db/
 6. Update unit tests — they mock individual modules (`../db/supabase`, `../db/workflows`); after the refactor they mock `../db` instead
 
 No behavior changes in production — when `DB_BACKEND` is unset, everything works exactly as today.
+
+---
+
+---
+
+## 20. Smart AI Collaborator (Bianca)
+
+### Overview
+
+The RT tester's feedback was that the bot felt too rigid and transactional — it classified and acted, but never felt like a collaborator. This section documents the personality and collaborative intelligence layer added to the bot.
+
+**Goals:**
+- Give the AI a name and a consistent, warm identity
+- Enable proactive pattern detection (e.g. recurring demands → suggest a workflow)
+- Add a genuine brainstorming/discussion mode, distinct from action mode
+- Never take actions without explicit confirmation — especially in discussion mode
+
+---
+
+### Bianca's Identity (`SYSTEM_PROMPT` in `src/ai/glm.ts`)
+
+The system prompt was rewritten from a generic assistant framing to a named, proactive collaborator:
+
+- **Name:** Bianca
+- **Role:** Assistente inteligente da RT (not just "um assistente")
+- **Scope:** Demands, notes, queries, workflows, and notifications — she knows the full system
+- **Proactive behavior:** If Bianca notices a recurring pattern in demands, she *mentions* the possibility of creating a workflow — but never automatically. Suggestion only, not action.
+- **Collaborative instinct:** If the RT seems to be planning or asking for an opinion, Bianca leans into the conversation before proposing actions.
+- **Tone:** Direct, warm, collaborative — not robotic or formal.
+- **Preserved rules:** Numbered demand list format, priority emojis, no tables, no reordering — unchanged from previous version.
+
+---
+
+### Discuss Mode (`DISCUSS_PROMPT` in `src/ai/glm.ts`)
+
+A separate exported prompt for when Bianca is in collaborative/brainstorming mode.
+
+**Design:**
+- Positioned as a senior operations consultant / thinking partner
+- Encourages open questions, exploring angles, considering trade-offs before deciding
+- Explicitly instructs Bianca NOT to register anything, create workflows, or send notifications without a follow-up confirmation after the discussion
+- May reference open demands as context if relevant, but doesn't list them automatically
+- If a concrete action emerges, Bianca says: "Quando quiser, posso registrar isso para você — é só confirmar."
+
+---
+
+### `discuss` Classification Intent
+
+Added to `Classification.type` union in `src/ai/classifier.ts`:
+
+```typescript
+type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'suggest_workflow' | 'discuss' | 'other'
+```
+
+**When it fires:** The LLM classifies a message as `discuss` when the RT wants to think, plan, or get an opinion without registering anything — examples: "o que você acha de...", "estou pensando em...", "me ajuda a pensar sobre...", "qual seria a melhor forma de...". It does NOT fire if there is a clear action to take.
+
+**How it routes in `handler.ts`:**
+- No pending action is staged
+- Goes directly to the LLM reply path
+- Uses `DISCUSS_PROMPT` instead of `SYSTEM_PROMPT`
+- Demand context is still injected if available (useful for informed discussion)
+
+```typescript
+// src/whatsapp/handler.ts
+let systemPrompt = role !== 'rt' ? TEAM_PROMPT
+                 : classification.type === 'discuss' ? DISCUSS_PROMPT
+                 : SYSTEM_PROMPT;
+```
+
+---
+
+### Test Coverage
+
+| File | Tests added |
+|---|---|
+| `tests/glm.test.ts` | `DISCUSS_PROMPT` is exported and non-empty; `DISCUSS_PROMPT` differs from `SYSTEM_PROMPT` |
+| `tests/classifier.test.ts` | Classifies `discuss` for a planning/opinion message |
 
 ---
 
