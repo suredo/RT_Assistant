@@ -7,28 +7,30 @@ jest.mock('../src/db/workflows', () => ({
   createWorkflowStep: jest.fn(),
   deleteWorkflowSteps: jest.fn(),
   upsertTemplate: jest.fn(),
+  getTemplateByName: jest.fn(),
 }));
 
 import { handleManageWorkflows, executeManageCommand, modifyManageCommand, formatWorkflowList, ManageResult } from '../src/workflows/manager';
 import { chat } from '../src/ai/glm';
 import {
   getAllWorkflows, createWorkflow, updateWorkflow,
-  createWorkflowStep, deleteWorkflowSteps, upsertTemplate,
+  createWorkflowStep, deleteWorkflowSteps, upsertTemplate, getTemplateByName,
 } from '../src/db/workflows';
 
-const mockChat            = jest.mocked(chat);
-const mockGetAll          = jest.mocked(getAllWorkflows);
-const mockCreate          = jest.mocked(createWorkflow);
-const mockUpdate          = jest.mocked(updateWorkflow);
-const mockCreateStep      = jest.mocked(createWorkflowStep);
-const mockDeleteSteps     = jest.mocked(deleteWorkflowSteps);
-const mockUpsertTemplate  = jest.mocked(upsertTemplate);
+const mockChat              = jest.mocked(chat);
+const mockGetAll            = jest.mocked(getAllWorkflows);
+const mockCreate            = jest.mocked(createWorkflow);
+const mockUpdate            = jest.mocked(updateWorkflow);
+const mockCreateStep        = jest.mocked(createWorkflowStep);
+const mockDeleteSteps       = jest.mocked(deleteWorkflowSteps);
+const mockUpsertTemplate    = jest.mocked(upsertTemplate);
+const mockGetTemplateByName = jest.mocked(getTemplateByName);
 
 const WF_ACTIVE   = { id: 'w1', name: 'Onboarding', description: 'Quando alguém é contratado', is_active: true,  created_at: '' };
 const WF_INACTIVE = { id: 'w2', name: 'Offboarding', description: 'Quando alguém sai',          is_active: false, created_at: '' };
 
 const STEPS_DEF = [
-  { step_order: 1, step_type: 'send_message', content: 'Bem-vindo, {{name}}!' },
+  { step_order: 1, step_type: 'send_message', content: 'Onboarding — boas-vindas', template_content: 'Bem-vindo, {{name}}!' },
   { step_order: 2, step_type: 'ask_question', content: 'Qual o cargo de {{name}}?', variable_name: 'role' },
 ];
 
@@ -44,6 +46,7 @@ beforeEach(() => {
   mockDeleteSteps.mockResolvedValue(undefined);
   mockUpdate.mockResolvedValue(undefined);
   mockUpsertTemplate.mockResolvedValue({ id: 't1', name: 'Test — passo 1', content: 'Test', created_at: '' });
+  mockGetTemplateByName.mockResolvedValue(null); // no existing template by default
 });
 
 // ── formatWorkflowList ─────────────────────────────────────────────────────────
@@ -138,10 +141,11 @@ describe('handleManageWorkflows() — create', () => {
     const result = await handleManageWorkflows('cria workflow test');
 
     if (result.type === 'preview') {
-      expect(result.preview).toContain('Enviar mensagem');  // send_message label
-      expect(result.preview).toContain('Perguntar');        // ask_question label
-      expect(result.preview).toContain('Bem-vindo');        // step content
-      expect(result.preview).toContain('{{role}}');         // captured variable
+      expect(result.preview).toContain('Template:');              // send_message shows template label
+      expect(result.preview).toContain('Onboarding — boas-vindas'); // template name
+      expect(result.preview).toContain('novo');                   // new template badge
+      expect(result.preview).toContain('Perguntar');              // ask_question label
+      expect(result.preview).toContain('{{role}}');               // captured variable
     }
   });
 
@@ -213,17 +217,19 @@ describe('executeManageCommand() — create', () => {
 
   test('upserts message_template for send_message step and links template_id', async () => {
     mockCreate.mockResolvedValue(WF_ACTIVE);
-    const tpl = { id: 't1', name: 'Onboarding — passo 1', content: 'Bem-vindo, {{name}}!', created_at: '' };
+    const step = STEPS_DEF[0]; // { content: 'Onboarding — boas-vindas', template_content: 'Bem-vindo, {{name}}!' }
+    const tpl = { id: 't1', name: step.content, content: step.template_content!, created_at: '' };
     mockUpsertTemplate.mockResolvedValue(tpl);
 
     await executeManageCommand({
       operation: 'create',
       name: 'Onboarding',
       description: 'Quando alguém é contratado',
-      steps: [STEPS_DEF[0]], // send_message only
+      steps: [step], // send_message only
     });
 
-    expect(mockUpsertTemplate).toHaveBeenCalledWith('Onboarding — passo 1', STEPS_DEF[0].content);
+    // content = template name, template_content = message text
+    expect(mockUpsertTemplate).toHaveBeenCalledWith(step.content, step.template_content);
     expect(mockCreateStep).toHaveBeenCalledWith(expect.objectContaining({ template_id: 't1' }));
   });
 
@@ -485,6 +491,59 @@ describe('modifyManageCommand()', () => {
     expect(result.type).toBe('immediate');
     if (result.type === 'immediate') {
       expect(result.response).toContain('⚠️');
+    }
+  });
+});
+
+describe('handleManageWorkflows() — template resolution', () => {
+  test('marks send_message step as (existente) when template already exists in DB', async () => {
+    const existingTpl = { id: 't99', name: 'Onboarding — boas-vindas', content: 'Bem-vindo!', created_at: '' };
+    mockGetTemplateByName.mockResolvedValue(existingTpl);
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Test',
+      description: 'Gatilho',
+      steps: [STEPS_DEF[0]],
+    }));
+
+    const result = await handleManageWorkflows('cria workflow test');
+
+    if (result.type === 'preview') {
+      expect(result.preview).toContain('existente');
+      expect(result.cmd.steps![0].template_exists).toBe(true);
+    }
+  });
+
+  test('marks send_message step as (novo) when template does not exist', async () => {
+    mockGetTemplateByName.mockResolvedValue(null);
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Test',
+      description: 'Gatilho',
+      steps: [STEPS_DEF[0]],
+    }));
+
+    const result = await handleManageWorkflows('cria workflow test');
+
+    if (result.type === 'preview') {
+      expect(result.preview).toContain('novo');
+      expect(result.cmd.steps![0].template_exists).toBe(false);
+    }
+  });
+
+  test('auto-generates template name when LLM puts full content in content field', async () => {
+    mockGetTemplateByName.mockResolvedValue(null);
+    // LLM didn't follow the two-field convention — full content in content, no template_content
+    const step = { step_order: 1, step_type: 'send_message', content: 'Mensagem muito longa que excede oitenta caracteres e por isso não pode ser um nome de template válido curto' };
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create', name: 'Onboarding', description: 'Gatilho', steps: [step],
+    }));
+
+    const result = await handleManageWorkflows('cria workflow');
+
+    if (result.type === 'preview') {
+      // The resolved step should have template_content populated
+      expect(result.cmd.steps![0].template_content).toBeTruthy();
     }
   });
 });

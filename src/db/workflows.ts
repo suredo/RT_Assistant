@@ -145,6 +145,16 @@ export async function getTemplates(): Promise<MessageTemplate[]> {
   return data ?? [];
 }
 
+export async function getTemplateByName(name: string): Promise<MessageTemplate | null> {
+  const { data, error } = await supabase
+    .from('message_templates')
+    .select('*')
+    .eq('name', name)
+    .single();
+  if (error) return null;
+  return data;
+}
+
 export async function getTemplateById(id: string): Promise<MessageTemplate | null> {
   const { data, error } = await supabase
     .from('message_templates')

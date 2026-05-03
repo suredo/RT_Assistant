@@ -29,7 +29,7 @@ jest.mock('@supabase/supabase-js', () => ({
 import {
   getActiveWorkflows, getAllWorkflows, getWorkflowById, createWorkflow, updateWorkflow,
   getWorkflowSteps, createWorkflowStep, deleteWorkflowSteps,
-  getTemplates, getTemplateById, createTemplate, updateTemplate, upsertTemplate,
+  getTemplates, getTemplateByName, getTemplateById, createTemplate, updateTemplate, upsertTemplate,
   getInstanceById, getActiveInstance, createInstance, advanceInstance, completeInstance, cancelInstance,
   createNotification, getPendingNotifications, markNotificationSent, cancelNotification,
 } from '../src/db/workflows';
@@ -220,6 +220,30 @@ describe('upsertTemplate()', () => {
     });
 
     await expect(upsertTemplate('fail', 'content')).rejects.toBeDefined();
+  });
+});
+
+describe('getTemplateByName()', () => {
+  const TPL = { id: 't1', name: 'Onboarding — boas-vindas', content: 'Bem-vindo!', created_at: '' };
+
+  test('returns template when found', async () => {
+    mockSelect.mockReturnValue({
+      eq: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: TPL, error: null }) })
+    });
+
+    const result = await getTemplateByName('Onboarding — boas-vindas');
+
+    expect(result).toEqual(TPL);
+  });
+
+  test('returns null when not found', async () => {
+    mockSelect.mockReturnValue({
+      eq: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: null, error: { message: 'not found' } }) })
+    });
+
+    const result = await getTemplateByName('inexistente');
+
+    expect(result).toBeNull();
   });
 });
 

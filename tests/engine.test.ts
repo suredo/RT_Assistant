@@ -1,5 +1,6 @@
 jest.mock('../src/db/workflows', () => ({
   getWorkflowSteps: jest.fn(),
+  getTemplateById: jest.fn(),
   getInstanceById: jest.fn(),
   getActiveInstance: jest.fn(),
   createInstance: jest.fn(),
@@ -24,7 +25,7 @@ import {
   triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance,
 } from '../src/workflows/engine';
 import {
-  getWorkflowSteps, getInstanceById, getActiveInstance, createInstance,
+  getWorkflowSteps, getTemplateById, getInstanceById, getActiveInstance, createInstance,
   advanceInstance, completeInstance, cancelInstance,
 } from '../src/db/workflows';
 import { interpolate } from '../src/workflows/interpolate';
@@ -32,6 +33,7 @@ import { classify } from '../src/ai/classifier';
 import { formatDemand } from '../src/format';
 
 const mockGetSteps       = jest.mocked(getWorkflowSteps);
+const mockGetTemplateById = jest.mocked(getTemplateById);
 const mockGetInstance    = jest.mocked(getInstanceById);
 const mockGetActive      = jest.mocked(getActiveInstance);
 const mockCreate        = jest.mocked(createInstance);
@@ -456,5 +458,59 @@ describe('getResumableInstance()', () => {
     const result = await getResumableInstance('5511999');
 
     expect(result).toBeNull();
+  });
+});
+
+describe('triggerWorkflow() — send_message template resolution', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('uses template content when step has a template_id', async () => {
+    const stepWithTemplate = {
+      ...STEP_SEND,
+      content: 'Onboarding — boas-vindas', // template name
+      template_id: 't1',
+    };
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([stepWithTemplate]);
+    mockGetTemplateById.mockResolvedValue({
+      id: 't1', name: 'Onboarding — boas-vindas',
+      content: 'Bem-vindo, {{name}}!', created_at: '',
+    });
+
+    const result = await triggerWorkflow('wf-1', '5511999', { name: 'Frank' });
+
+    expect(result.action).toBe('send_message');
+    // Template content is returned (mockInterpolate passes through)
+    if (result.action === 'send_message') {
+      expect(result.content).toBe('Bem-vindo, {{name}}!');
+    }
+    expect(mockGetTemplateById).toHaveBeenCalledWith('t1');
+  });
+
+  test('falls back to step.content when template_id is not set', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_SEND]); // no template_id
+
+    const result = await triggerWorkflow('wf-1', '5511999', {});
+
+    expect(result.action).toBe('send_message');
+    if (result.action === 'send_message') {
+      expect(result.content).toBe(STEP_SEND.content);
+    }
+    expect(mockGetTemplateById).not.toHaveBeenCalled();
+  });
+
+  test('falls back to step.content when template fetch fails', async () => {
+    const stepWithTemplate = { ...STEP_SEND, template_id: 't1' };
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([stepWithTemplate]);
+    mockGetTemplateById.mockRejectedValue(new Error('DB error'));
+
+    const result = await triggerWorkflow('wf-1', '5511999', {});
+
+    expect(result.action).toBe('send_message');
+    if (result.action === 'send_message') {
+      expect(result.content).toBe(STEP_SEND.content);
+    }
   });
 });
