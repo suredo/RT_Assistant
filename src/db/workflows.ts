@@ -173,6 +173,21 @@ export async function updateTemplate(id: string, content: string): Promise<void>
   if (error) throw error;
 }
 
+/**
+ * Create or update a template by name (upsert on the unique name column).
+ * Used when saving workflow send_message steps so templates stay in sync
+ * with the workflow content.
+ */
+export async function upsertTemplate(name: string, content: string): Promise<MessageTemplate> {
+  const { data, error } = await supabase
+    .from('message_templates')
+    .upsert({ name, content }, { onConflict: 'name' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // ── Workflow Instances ────────────────────────────────────────────────────────
 
 export async function getInstanceById(id: string): Promise<WorkflowInstance | null> {

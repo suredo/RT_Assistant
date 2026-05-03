@@ -1,7 +1,7 @@
 import { chat } from '../ai/glm';
 import {
   getAllWorkflows, createWorkflow, updateWorkflow,
-  createWorkflowStep, deleteWorkflowSteps,
+  createWorkflowStep, deleteWorkflowSteps, upsertTemplate,
   Workflow,
 } from '../db/workflows';
 
@@ -126,14 +126,29 @@ async function findWorkflowByName(name: string): Promise<Workflow | null> {
   return workflows.find(w => w.name.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
-async function saveSteps(workflowId: string, steps: StepDef[]): Promise<void> {
+async function saveSteps(workflowId: string, steps: StepDef[], workflowName?: string): Promise<void> {
   for (const s of steps) {
+    let template_id: string | undefined;
+
+    // Auto-save send_message content as a reusable template so it can be
+    // referenced independently of the workflow later.
+    if (s.step_type === 'send_message' && workflowName) {
+      const templateName = `${workflowName} — passo ${s.step_order}`;
+      try {
+        const tpl = await upsertTemplate(templateName, s.content);
+        template_id = tpl.id;
+      } catch {
+        // Non-critical — step is still saved without a template_id
+      }
+    }
+
     await createWorkflowStep({
       workflow_id: workflowId,
       step_order: s.step_order,
       step_type: s.step_type,
       content: s.content,
       variable_name: s.variable_name,
+      template_id,
     });
   }
 }
@@ -148,7 +163,7 @@ export async function executeManageCommand(cmd: ManageCommand): Promise<string> 
       return '⚠️ Para criar um workflow preciso do nome, da descrição (gatilho) e de pelo menos um passo.';
     }
     const workflow = await createWorkflow(cmd.name, cmd.description);
-    await saveSteps(workflow.id, cmd.steps);
+    await saveSteps(workflow.id, cmd.steps, cmd.name);
     const n = cmd.steps.length;
     return `✅ Workflow *${workflow.name}* criado com ${n} passo${n > 1 ? 's' : ''}.`;
   }
@@ -161,7 +176,7 @@ export async function executeManageCommand(cmd: ManageCommand): Promise<string> 
     if (!target) return `⚠️ Workflow "${cmd.name}" não encontrado.`;
 
     await deleteWorkflowSteps(target.id);
-    await saveSteps(target.id, cmd.steps);
+    await saveSteps(target.id, cmd.steps, cmd.name);
     if (cmd.description) await updateWorkflow(target.id, { description: cmd.description });
 
     const n = cmd.steps.length;

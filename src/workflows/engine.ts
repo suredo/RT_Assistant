@@ -9,6 +9,24 @@ import {
   WorkflowInstance,
 } from '../db/workflows';
 import { interpolate } from './interpolate';
+
+// ── System variables ───────────────────────────────────────────────────────────
+// Built-in placeholders available in every step content without needing an
+// ask_question to capture them. Instance variables (captured from user answers)
+// take precedence and can override these if needed.
+
+function systemVariables(): Record<string, string> {
+  const now = new Date();
+  const locale = 'pt-BR';
+  const tz    = { timeZone: 'America/Sao_Paulo' };
+  const date  = now.toLocaleDateString(locale, tz);
+  const time  = now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', ...tz });
+  return {
+    data_atual:      date,
+    hora_atual:      time,
+    data_hora_atual: `${date} ${time}`,
+  };
+}
 import { classify } from '../ai/classifier';
 import { PendingAction } from '../ai/context';
 import { formatDemand } from '../format';
@@ -31,7 +49,9 @@ async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
     return { action: 'workflow_complete', summary: '✅ Fluxo concluído.' };
   }
 
-  const vars = instance.variables as Record<string, string>;
+  // System variables are available to every step; instance variables (user answers)
+  // override them when there is a name collision.
+  const vars = { ...systemVariables(), ...(instance.variables as Record<string, string>) };
   const content = interpolate(step.content, vars);
 
   if (step.step_type === 'send_message') {

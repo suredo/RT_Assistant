@@ -1,6 +1,7 @@
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
+const mockUpsert = jest.fn();
 const mockDelete = jest.fn();
 const mockEq = jest.fn();
 const mockOr = jest.fn();
@@ -14,6 +15,7 @@ jest.mock('@supabase/supabase-js', () => ({
       select: mockSelect,
       insert: mockInsert,
       update: mockUpdate,
+      upsert: mockUpsert,
       delete: mockDelete,
       eq: mockEq,
       or: mockOr,
@@ -27,14 +29,14 @@ jest.mock('@supabase/supabase-js', () => ({
 import {
   getActiveWorkflows, getAllWorkflows, getWorkflowById, createWorkflow, updateWorkflow,
   getWorkflowSteps, createWorkflowStep, deleteWorkflowSteps,
-  getTemplates, getTemplateById, createTemplate, updateTemplate,
+  getTemplates, getTemplateById, createTemplate, updateTemplate, upsertTemplate,
   getInstanceById, getActiveInstance, createInstance, advanceInstance, completeInstance, cancelInstance,
   createNotification, getPendingNotifications, markNotificationSent, cancelNotification,
 } from '../src/db/workflows';
 
 const chain = (result: unknown) => {
   const obj: Record<string, jest.Mock> = {};
-  const methods = ['select','insert','update','delete','eq','or','order','limit','single'];
+  const methods = ['select','insert','update','upsert','delete','eq','or','order','limit','single'];
   methods.forEach(m => { obj[m] = jest.fn().mockReturnValue(obj); });
   obj['single'] = jest.fn().mockResolvedValue(result);
   obj['order'] = jest.fn().mockReturnValue(obj);
@@ -190,6 +192,34 @@ describe('cancelInstance()', () => {
     mockUpdate.mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) });
     await expect(cancelInstance('i1')).resolves.toBeUndefined();
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'cancelled' }));
+  });
+});
+
+// ── Message Templates ─────────────────────────────────────────────────────────
+
+describe('upsertTemplate()', () => {
+  const TPL = { id: 't1', name: 'Onboarding — passo 3', content: 'Bem-vindo, {{name}}!', created_at: '' };
+
+  test('upserts by name and returns the template', async () => {
+    mockUpsert.mockReturnValue({
+      select: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: TPL, error: null }) })
+    });
+
+    const result = await upsertTemplate('Onboarding — passo 3', 'Bem-vindo, {{name}}!');
+
+    expect(mockUpsert).toHaveBeenCalledWith(
+      { name: 'Onboarding — passo 3', content: 'Bem-vindo, {{name}}!' },
+      { onConflict: 'name' }
+    );
+    expect(result).toEqual(TPL);
+  });
+
+  test('throws when Supabase returns an error', async () => {
+    mockUpsert.mockReturnValue({
+      select: jest.fn().mockReturnValue({ single: jest.fn().mockResolvedValue({ data: null, error: { message: 'DB error' } }) })
+    });
+
+    await expect(upsertTemplate('fail', 'content')).rejects.toBeDefined();
   });
 });
 

@@ -157,10 +157,25 @@ describe('triggerWorkflow()', () => {
 
     const result = await triggerWorkflow('wf-1', '5511999', { name: 'Frank' });
 
-    expect(mockInterpolate).toHaveBeenCalledWith('Bem-vindo, {{name}}!', { name: 'Frank' });
+    expect(mockInterpolate).toHaveBeenCalledWith('Bem-vindo, {{name}}!', expect.objectContaining({ name: 'Frank' }));
     if (result.action === 'send_message') {
       expect(result.content).toBe('Bem-vindo, Frank!');
     }
+  });
+
+  test('injects system variables (data_atual, hora_atual) into interpolation context', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_SEND]);
+
+    await triggerWorkflow('wf-1', '5511999', { name: 'Frank' });
+
+    const callArgs = mockInterpolate.mock.calls[0];
+    const vars = callArgs[1] as Record<string, string>;
+    expect(vars).toHaveProperty('data_atual');
+    expect(vars).toHaveProperty('hora_atual');
+    expect(vars).toHaveProperty('data_hora_atual');
+    // Instance variables take precedence over system variables
+    expect(vars.name).toBe('Frank');
   });
 });
 

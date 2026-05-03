@@ -6,21 +6,23 @@ jest.mock('../src/db/workflows', () => ({
   updateWorkflow: jest.fn(),
   createWorkflowStep: jest.fn(),
   deleteWorkflowSteps: jest.fn(),
+  upsertTemplate: jest.fn(),
 }));
 
 import { handleManageWorkflows, executeManageCommand, formatWorkflowList, ManageResult } from '../src/workflows/manager';
 import { chat } from '../src/ai/glm';
 import {
   getAllWorkflows, createWorkflow, updateWorkflow,
-  createWorkflowStep, deleteWorkflowSteps,
+  createWorkflowStep, deleteWorkflowSteps, upsertTemplate,
 } from '../src/db/workflows';
 
-const mockChat         = jest.mocked(chat);
-const mockGetAll       = jest.mocked(getAllWorkflows);
-const mockCreate       = jest.mocked(createWorkflow);
-const mockUpdate       = jest.mocked(updateWorkflow);
-const mockCreateStep   = jest.mocked(createWorkflowStep);
-const mockDeleteSteps  = jest.mocked(deleteWorkflowSteps);
+const mockChat            = jest.mocked(chat);
+const mockGetAll          = jest.mocked(getAllWorkflows);
+const mockCreate          = jest.mocked(createWorkflow);
+const mockUpdate          = jest.mocked(updateWorkflow);
+const mockCreateStep      = jest.mocked(createWorkflowStep);
+const mockDeleteSteps     = jest.mocked(deleteWorkflowSteps);
+const mockUpsertTemplate  = jest.mocked(upsertTemplate);
 
 const WF_ACTIVE   = { id: 'w1', name: 'Onboarding', description: 'Quando alguém é contratado', is_active: true,  created_at: '' };
 const WF_INACTIVE = { id: 'w2', name: 'Offboarding', description: 'Quando alguém sai',          is_active: false, created_at: '' };
@@ -41,6 +43,7 @@ beforeEach(() => {
   mockCreateStep.mockResolvedValue({ id: 's1', workflow_id: 'w1', step_order: 1, step_type: 'send_message', content: 'Test' });
   mockDeleteSteps.mockResolvedValue(undefined);
   mockUpdate.mockResolvedValue(undefined);
+  mockUpsertTemplate.mockResolvedValue({ id: 't1', name: 'Test — passo 1', content: 'Test', created_at: '' });
 });
 
 // ── formatWorkflowList ─────────────────────────────────────────────────────────
@@ -206,6 +209,52 @@ describe('executeManageCommand() — create', () => {
 
     expect(result).toContain('1 passo');
     expect(result).not.toContain('1 passos');
+  });
+
+  test('upserts message_template for send_message step and links template_id', async () => {
+    mockCreate.mockResolvedValue(WF_ACTIVE);
+    const tpl = { id: 't1', name: 'Onboarding — passo 1', content: 'Bem-vindo, {{name}}!', created_at: '' };
+    mockUpsertTemplate.mockResolvedValue(tpl);
+
+    await executeManageCommand({
+      operation: 'create',
+      name: 'Onboarding',
+      description: 'Quando alguém é contratado',
+      steps: [STEPS_DEF[0]], // send_message only
+    });
+
+    expect(mockUpsertTemplate).toHaveBeenCalledWith('Onboarding — passo 1', STEPS_DEF[0].content);
+    expect(mockCreateStep).toHaveBeenCalledWith(expect.objectContaining({ template_id: 't1' }));
+  });
+
+  test('does not call upsertTemplate for ask_question steps', async () => {
+    mockCreate.mockResolvedValue(WF_ACTIVE);
+
+    await executeManageCommand({
+      operation: 'create',
+      name: 'Onboarding',
+      description: 'Gatilho',
+      steps: [STEPS_DEF[1]], // ask_question only
+    });
+
+    expect(mockUpsertTemplate).not.toHaveBeenCalled();
+    expect(mockCreateStep).toHaveBeenCalledWith(expect.objectContaining({ template_id: undefined }));
+  });
+
+  test('step is still saved even if upsertTemplate fails', async () => {
+    mockCreate.mockResolvedValue(WF_ACTIVE);
+    mockUpsertTemplate.mockRejectedValue(new Error('DB error'));
+
+    const result = await executeManageCommand({
+      operation: 'create',
+      name: 'Onboarding',
+      description: 'Gatilho',
+      steps: [STEPS_DEF[0]],
+    });
+
+    // Step should still be created without template_id
+    expect(mockCreateStep).toHaveBeenCalledWith(expect.objectContaining({ template_id: undefined }));
+    expect(result).toContain('criado');
   });
 
   test('returns error when name is missing', async () => {
