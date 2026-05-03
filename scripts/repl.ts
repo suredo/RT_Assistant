@@ -20,6 +20,7 @@ dotenv.config();
 import * as readline from 'readline';
 import { handleMessage } from '../src/whatsapp/handler';
 import { clearHistory, clearPendingAction, clearActiveWorkflow } from '../src/ai/context';
+import { cancelAllActiveInstances } from '../src/db/workflows';
 
 const SENDER = process.env.REPL_SENDER ?? '5511999999999';
 const ROLE   = (process.env.REPL_ROLE   ?? 'rt') as 'rt' | 'team';
@@ -48,7 +49,16 @@ async function handleLine(input: string) {
     clearHistory(SENDER);
     clearPendingAction(SENDER);
     clearActiveWorkflow(SENDER);
-    console.log('✅ Estado resetado — histórico e ações pendentes limpos.\n');
+    try {
+      const cancelled = await cancelAllActiveInstances(SENDER);
+      if (cancelled > 0) {
+        console.log(`✅ Estado resetado — ${cancelled} instância(s) de workflow cancelada(s) no banco.\n`);
+      } else {
+        console.log('✅ Estado resetado — histórico e ações pendentes limpos.\n');
+      }
+    } catch {
+      console.log('✅ Estado em memória resetado (erro ao cancelar instâncias no banco).\n');
+    }
     prompt();
     return;
   }
@@ -70,7 +80,7 @@ console.log('├─────────────────────�
 console.log(`│  Remetente : ${SENDER.padEnd(27)}│`);
 console.log(`│  Papel     : ${ROLE.padEnd(27)}│`);
 console.log('├─────────────────────────────────────────┤');
-console.log('│  /reset  limpar estado                  │');
+console.log('│  /reset  limpar estado + cancelar flows │');
 console.log('│  /quit   sair                           │');
 console.log('└─────────────────────────────────────────┘\n');
 
