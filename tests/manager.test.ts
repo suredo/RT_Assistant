@@ -9,7 +9,7 @@ jest.mock('../src/db/workflows', () => ({
   upsertTemplate: jest.fn(),
 }));
 
-import { handleManageWorkflows, executeManageCommand, formatWorkflowList, ManageResult } from '../src/workflows/manager';
+import { handleManageWorkflows, executeManageCommand, modifyManageCommand, formatWorkflowList, ManageResult } from '../src/workflows/manager';
 import { chat } from '../src/ai/glm';
 import {
   getAllWorkflows, createWorkflow, updateWorkflow,
@@ -417,6 +417,75 @@ describe('handleManageWorkflows() — fallback', () => {
     const result = await handleManageWorkflows('lista workflows');
 
     expect(immediateResponse(result)).toContain('⚠️');
+  });
+});
+
+describe('modifyManageCommand()', () => {
+  const existingCreate = {
+    operation: 'create' as const,
+    name: 'Contratação',
+    description: 'Quando há necessidade de contratar',
+    steps: [
+      { step_order: 1, step_type: 'ask_question', content: 'Qual o cargo?', variable_name: 'cargo' },
+    ],
+  };
+
+  test('returns a new preview with modified steps', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Contratação',
+      description: 'Quando há necessidade de contratar',
+      steps: [
+        { step_order: 1, step_type: 'ask_question', content: 'Qual o cargo?', variable_name: 'cargo' },
+        { step_order: 2, step_type: 'ask_question', content: 'Qual o departamento?', variable_name: 'depto' },
+      ],
+    }));
+
+    const result = await modifyManageCommand('adiciona uma pergunta sobre departamento', existingCreate);
+
+    expect(result.type).toBe('preview');
+    if (result.type === 'preview') {
+      expect(result.cmd.steps).toHaveLength(2);
+      expect(result.cmd.steps![1].variable_name).toBe('depto');
+    }
+  });
+
+  test('preserves the original operation type even if LLM changes it', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'edit', // LLM incorrectly returned 'edit' for a create context
+      name: 'Contratação',
+      description: 'Quando há necessidade de contratar',
+      steps: [{ step_order: 1, step_type: 'send_message', content: 'Olá' }],
+    }));
+
+    const result = await modifyManageCommand('muda o passo 1 para send_message', existingCreate);
+
+    expect(result.type).toBe('preview');
+    if (result.type === 'preview') {
+      expect(result.cmd.operation).toBe('create');
+    }
+  });
+
+  test('returns immediate error when LLM returns unknown operation', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'unknown' }));
+
+    const result = await modifyManageCommand('algo confuso', existingCreate);
+
+    expect(result.type).toBe('immediate');
+    if (result.type === 'immediate') {
+      expect(result.response).toContain('⚠️');
+    }
+  });
+
+  test('returns immediate error when LLM call throws', async () => {
+    mockChat.mockRejectedValue(new Error('API timeout'));
+
+    const result = await modifyManageCommand('muda tudo', existingCreate);
+
+    expect(result.type).toBe('immediate');
+    if (result.type === 'immediate') {
+      expect(result.response).toContain('⚠️');
+    }
   });
 });
 
