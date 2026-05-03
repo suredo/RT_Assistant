@@ -7,7 +7,7 @@ export interface QueryFilters {
 }
 
 export interface Classification {
-  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'suggest_workflow' | 'other';
+  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'suggest_workflow' | 'discuss' | 'other';
   category: 'urgência clínica' | 'gestão de equipe' | 'equipe médica' | 'administrativo' | 'regulatório' | 'rotina';
   priority: 'high' | 'medium' | 'low';
   summary: string;
@@ -34,7 +34,7 @@ const FALLBACK: Classification = {
 
 const BASE_CLASSIFY_PROMPT = `Você é um classificador de demandas de uma clínica de hemodiálise.
 Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
-- type: "new_demand" | "update" | "query" | "add_note" | "trigger_workflow" | "manage_workflows" | "suggest_workflow" | "other"
+- type: "new_demand" | "update" | "query" | "add_note" | "trigger_workflow" | "manage_workflows" | "suggest_workflow" | "discuss" | "other"
 - category: "urgência clínica" | "gestão de equipe" | "equipe médica" | "administrativo" | "regulatório" | "rotina"
 - priority: "high" | "medium" | "low"
 - summary: resumo curto da demanda em português (máximo 80 caracteres)
@@ -58,6 +58,8 @@ Use type "manage_workflows" quando a mensagem menciona a palavra "workflow" junt
   - "desativa o workflow de contratação"
 
 Use type "suggest_workflow" quando a mensagem descreve um processo recorrente ou procedimento estruturado que tipicamente envolve múltiplas etapas coordenadas (exemplos: abertura de vaga, contratação/admissão de funcionário, desligamento/offboarding, integração de novo colaborador, treinamento obrigatório, renovação de contrato, auditoria periódica) E nenhum workflow ativo corresponde a esse gatilho. NÃO use "suggest_workflow" para demandas urgentes ou únicas (problema com paciente, equipamento com defeito, compra pontual, dúvida). Ao retornar "suggest_workflow", preencha category, priority e summary normalmente como faria para new_demand.
+
+Use type "discuss" quando a mensagem indica que a RT quer pensar, planejar, discutir ou pedir opinião sem registrar nada — exemplos: "o que você acha de...", "estou pensando em...", "me ajuda a pensar sobre...", "qual seria a melhor forma de...". NÃO use "discuss" se houver uma ação clara a tomar.
 
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;

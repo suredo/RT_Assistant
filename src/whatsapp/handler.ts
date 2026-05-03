@@ -7,7 +7,7 @@
  * The WhatsApp client (client.ts) handles transport concerns and delegates here.
  */
 
-import { reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../ai/glm';
+import { reply, SYSTEM_PROMPT, DISCUSS_PROMPT, TEAM_PROMPT } from '../ai/glm';
 import { classify, mergeSummary } from '../ai/classifier';
 import {
   getHistory, addTurn, clearHistory,
@@ -353,7 +353,9 @@ export async function handleMessage(
   // ── LLM reply ─────────────────────────────────────────────────────────────
   if (classification.type === 'query') clearHistory(senderNumber);
 
-  let systemPrompt = role === 'rt' ? SYSTEM_PROMPT : TEAM_PROMPT;
+  let systemPrompt = role !== 'rt' ? TEAM_PROMPT
+                   : classification.type === 'discuss' ? DISCUSS_PROMPT
+                   : SYSTEM_PROMPT;
 
   if (role === 'rt') {
     let demandsForContext = openDemands;

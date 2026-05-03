@@ -1,11 +1,22 @@
 import axios from 'axios';
-import { chat, reply, SYSTEM_PROMPT, TEAM_PROMPT } from '../src/ai/glm';
+import { chat, reply, SYSTEM_PROMPT, DISCUSS_PROMPT, TEAM_PROMPT } from '../src/ai/glm';
 
 jest.mock('axios');
 const mockPost = jest.mocked(axios.post);
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('DISCUSS_PROMPT', () => {
+  test('is exported and is a non-empty string', () => {
+    expect(typeof DISCUSS_PROMPT).toBe('string');
+    expect(DISCUSS_PROMPT.length).toBeGreaterThan(0);
+  });
+
+  test('differs from SYSTEM_PROMPT', () => {
+    expect(DISCUSS_PROMPT).not.toBe(SYSTEM_PROMPT);
+  });
 });
 
 describe('chat()', () => {
