@@ -1,5 +1,6 @@
 import {
   getWorkflowSteps,
+  getTemplateById,
   getInstanceById,
   getActiveInstance,
   createInstance,
@@ -55,7 +56,16 @@ async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
   const content = interpolate(step.content, vars);
 
   if (step.step_type === 'send_message') {
-    return { action: 'send_message', content, instanceId: instance.id };
+    // If a template_id is set, fetch the template content and interpolate it.
+    // Falls back to step.content (interpolated above) for legacy steps without a template.
+    let messageContent = content;
+    if (step.template_id) {
+      try {
+        const template = await getTemplateById(step.template_id);
+        if (template) messageContent = interpolate(template.content, vars);
+      } catch { /* non-critical — fallback to step.content */ }
+    }
+    return { action: 'send_message', content: messageContent, instanceId: instance.id };
   }
 
   if (step.step_type === 'ask_question') {
