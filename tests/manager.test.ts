@@ -144,6 +144,7 @@ describe('handleManageWorkflows() — create', () => {
       expect(result.preview).toContain('Template:');              // send_message shows template label
       expect(result.preview).toContain('Onboarding — boas-vindas'); // template name
       expect(result.preview).toContain('novo');                   // new template badge
+      expect(result.preview).toContain('Bem-vindo');              // template content shown inline
       expect(result.preview).toContain('Perguntar');              // ask_question label
       expect(result.preview).toContain('{{role}}');               // captured variable
     }

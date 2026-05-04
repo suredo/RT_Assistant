@@ -146,7 +146,10 @@ function formatWorkflowPreview(cmd: ManageCommand): string {
   const stepLines = steps.map((s, i) => {
     if (s.step_type === 'send_message') {
       const badge = s.template_exists ? '_(existente)_' : '_(novo)_';
-      return `  ${i + 1}. 📤 Template: *${s.content}* ${badge}`;
+      const contentBlock = s.template_content
+        ? `\n     📄 _Conteúdo:_\n${s.template_content.split('\n').map(l => `     ${l}`).join('\n')}`
+        : '';
+      return `  ${i + 1}. 📤 Template: *${s.content}* ${badge}${contentBlock}`;
     }
     const label = formatStepType(s.step_type);
     const base  = `  ${i + 1}. ${label}: ${s.content}`;
