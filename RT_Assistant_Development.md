@@ -2138,4 +2138,80 @@ let systemPrompt = role !== 'rt' ? TEAM_PROMPT
 
 ---
 
+---
+
+## 21. Async Workflow Steps — Future Development
+
+> **Status: Planned — not yet implemented**
+
+### Overview
+
+Currently all workflow steps execute synchronously in the conversation flow. `ask_question` steps block the sender — the next message from that sender is always routed to `answerQuestion`. This works well for in-conversation questions but doesn't support cases where the workflow needs to wait for an external response (HR confirmation, lab results, supplier reply, patient exam clearance) while the RT continues doing other work.
+
+This section documents the agreed design for non-blocking workflow waits.
+
+---
+
+### New Step Type: `await_response`
+
+Behaves like `ask_question` in terms of what it asks and what variable it captures, but **does not block the sender**. When the engine reaches an `await_response` step:
+
+1. The question/message is sent to the RT
+2. The workflow instance status changes to `waiting` (new status alongside `active`, `completed`, `cancelled`)
+3. The RT returns to normal operation — demands, queries, notes, and other workflows work as usual
+4. When the awaited information arrives, the workflow resumes and stores the answer as a variable (same as `ask_question`)
+
+The step's `content` field contains what the workflow is waiting for (e.g. "Aguardando confirmação do RH de que {{name}} está apto para iniciar"). The accumulated `variables` in the instance provide context for matching later.
+
+---
+
+### Resume Detection
+
+When the RT sends a message and there are parked `waiting` instances:
+
+1. **Context injection**: waiting instances (workflow name, pending question, accumulated variables) are injected into the `classify()` call alongside open demands and active workflows
+2. **Classifier match**: the LLM tries to connect the message to a waiting instance — e.g. "HR confirmou que o Frank está apto" matches a workflow waiting for HR confirmation on Frank's hiring process
+3. **Confident match** → classifier returns `resume_workflow` type with the matched `instanceId`; handler routes the message as the answer; workflow advances
+4. **Ambiguous match** → classifier returns `resume_workflow` with null `instanceId`; Bianca asks a clarifying question referencing actual context: *"Isso é sobre o processo de contratação do Frank ou sobre a confirmação do fornecedor do equipamento de Reúso?"*
+5. **No match** → message is processed normally (demand, query, etc.)
+
+**Design principle:** if only one `waiting` instance exists and the message clearly relates to it, resume silently. Only ask for clarification when there is genuine ambiguity.
+
+---
+
+### Multi-Intent Rule
+
+If a message could both resume a workflow and register a new demand, the classifier picks the dominant intent and handles one per message. The RT can send a follow-up for the second intent. Handling both in a single message adds complexity without meaningful benefit.
+
+---
+
+### Future Integrations
+
+The `await_response` step is designed to be extended. The step could eventually have a `source` field indicating where the response is expected from:
+
+| Source | Behavior |
+|---|---|
+| `rt` | RT relays the answer via WhatsApp (current design) |
+| `team_member` | A specific team member's WhatsApp number provides the answer |
+| `email` | Automated inbound email integration resumes the workflow |
+| `webhook` | External system (lab, HR platform) triggers resume via HTTP |
+
+The resume mechanism is the same regardless of source — only the trigger changes.
+
+---
+
+### Changes Required (when implementing)
+
+| Area | Change |
+|---|---|
+| `workflow_instances` table | Add `waiting` to the `status` enum |
+| `src/workflows/engine.ts` | Add `await_response` step handler; new `parkInstance()` DB call |
+| `src/db/workflows.ts` | Add `getWaitingInstances(sender)`, `parkInstance(id)` |
+| `src/ai/classifier.ts` | Add `resume_workflow` to type union; inject waiting instances into prompt |
+| `src/whatsapp/handler.ts` | Before normal classify: fetch waiting instances, inject as context; handle `resume_workflow` intent |
+| `tests/engine.test.ts` | `await_response` step parks instance, returns non-blocking result |
+| `tests/classifier.test.ts` | `resume_workflow` intent with matched and ambiguous cases |
+
+---
+
 *Living document — update as decisions are made.*
