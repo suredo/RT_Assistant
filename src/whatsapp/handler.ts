@@ -12,12 +12,12 @@ import { classify, mergeSummary } from '../ai/classifier';
 import {
   getHistory, addTurn, clearHistory,
   getPendingAction, setPendingAction, clearPendingAction,
-  isConfirmation, isRejection,
+  isConfirmation, isRejection, isWorkflowCancellation,
   setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
   PendingAction
 } from '../ai/context';
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
-import { getActiveWorkflows, createNotification } from '../db/workflows';
+import { getActiveWorkflows, getWorkflowSteps, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance, StepResult } from '../workflows/engine';
 import { handleManageWorkflows, executeManageCommand, modifyManageCommand, ManageCommand } from '../workflows/manager';
 import { formatDemand, noteTimestamp } from '../format';
@@ -181,7 +181,9 @@ export async function handleMessage(
     }
   }
   if (activeInstanceId) {
-    if (isRejection(body)) {
+    // Use the stricter cancellation check so answers like "Não contratado"
+    // are forwarded to the engine instead of aborting the workflow.
+    if (isWorkflowCancellation(body)) {
       await cancelWorkflow(activeInstanceId);
       clearActiveWorkflow(senderNumber);
       await sendFn('❌ Fluxo cancelado. Como posso ajudar?');
@@ -274,9 +276,25 @@ export async function handleMessage(
   }
 
   // ── Fetch active workflows for classifier ─────────────────────────────────
-  let activeWorkflows: Array<{ id: string; name: string; description: string }> = [];
+  let activeWorkflows: Array<{ id: string; name: string; description: string; variables?: string[] }> = [];
   try {
-    activeWorkflows = await getActiveWorkflows();
+    const workflows = await getActiveWorkflows();
+    // Enrich each workflow with its ask_question variable names so the
+    // classifier uses the exact keys — enabling auto-skip in the engine.
+    activeWorkflows = await Promise.all(
+      workflows.map(async (w) => {
+        try {
+          const steps = await getWorkflowSteps(w.id);
+          const variables = steps
+            .filter(s => s.step_type === 'ask_question' && s.variable_name)
+            .sort((a, b) => a.step_order - b.step_order)
+            .map(s => s.variable_name as string);
+          return { ...w, variables };
+        } catch {
+          return w; // fall back without variables if steps can't be loaded
+        }
+      })
+    );
   } catch { /* non-critical — classifier falls back to base prompt */ }
 
   // ── Keyword pre-check for workflow management ─────────────────────────────

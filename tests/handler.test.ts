@@ -19,17 +19,18 @@ jest.mock('../src/ai/classifier', () => ({
 }));
 
 jest.mock('../src/ai/context', () => ({
-  getHistory:          jest.fn(),
-  addTurn:             jest.fn(),
-  clearHistory:        jest.fn(),
-  getPendingAction:    jest.fn(),
-  setPendingAction:    jest.fn(),
-  clearPendingAction:  jest.fn(),
-  isConfirmation:      jest.fn(),
-  isRejection:         jest.fn(),
-  setActiveWorkflow:   jest.fn(),
-  getActiveWorkflow:   jest.fn(),
-  clearActiveWorkflow: jest.fn(),
+  getHistory:               jest.fn(),
+  addTurn:                  jest.fn(),
+  clearHistory:             jest.fn(),
+  getPendingAction:         jest.fn(),
+  setPendingAction:         jest.fn(),
+  clearPendingAction:       jest.fn(),
+  isConfirmation:           jest.fn(),
+  isRejection:              jest.fn(),
+  isWorkflowCancellation:   jest.fn(),
+  setActiveWorkflow:        jest.fn(),
+  getActiveWorkflow:        jest.fn(),
+  clearActiveWorkflow:      jest.fn(),
 }));
 
 jest.mock('../src/db/supabase', () => ({
@@ -42,8 +43,9 @@ jest.mock('../src/db/supabase', () => ({
 }));
 
 jest.mock('../src/db/workflows', () => ({
-  getActiveWorkflows: jest.fn(),
-  createNotification: jest.fn(),
+  getActiveWorkflows:  jest.fn(),
+  getWorkflowSteps:    jest.fn(),
+  createNotification:  jest.fn(),
 }));
 
 jest.mock('../src/workflows/engine', () => ({
@@ -73,11 +75,11 @@ import { classify, mergeSummary } from '../src/ai/classifier';
 import {
   getActiveWorkflow, setActiveWorkflow, clearActiveWorkflow,
   getPendingAction, setPendingAction, clearPendingAction,
-  isConfirmation, isRejection,
+  isConfirmation, isRejection, isWorkflowCancellation,
   getHistory,
 } from '../src/ai/context';
 import { getOpenDemands, getDemands } from '../src/db/supabase';
-import { getActiveWorkflows } from '../src/db/workflows';
+import { getActiveWorkflows, getWorkflowSteps } from '../src/db/workflows';
 import {
   triggerWorkflow, answerQuestion, cancelWorkflow,
   getResumableInstance, advanceAfterConfirmation,
@@ -97,12 +99,14 @@ const mockClearActiveWorkflow  = jest.mocked(clearActiveWorkflow);
 const mockGetPendingAction     = jest.mocked(getPendingAction);
 const mockSetPendingAction     = jest.mocked(setPendingAction);
 const mockClearPendingAction   = jest.mocked(clearPendingAction);
-const mockIsConfirmation       = jest.mocked(isConfirmation);
-const mockIsRejection          = jest.mocked(isRejection);
-const mockGetHistory           = jest.mocked(getHistory);
-const mockGetOpenDemands       = jest.mocked(getOpenDemands);
-const mockGetDemands           = jest.mocked(getDemands);
-const mockGetActiveWorkflows   = jest.mocked(getActiveWorkflows);
+const mockIsConfirmation            = jest.mocked(isConfirmation);
+const mockIsRejection               = jest.mocked(isRejection);
+const mockIsWorkflowCancellation    = jest.mocked(isWorkflowCancellation);
+const mockGetHistory                = jest.mocked(getHistory);
+const mockGetOpenDemands            = jest.mocked(getOpenDemands);
+const mockGetDemands                = jest.mocked(getDemands);
+const mockGetActiveWorkflows        = jest.mocked(getActiveWorkflows);
+const mockGetWorkflowSteps          = jest.mocked(getWorkflowSteps);
 const mockTriggerWorkflow      = jest.mocked(triggerWorkflow);
 const mockAnswerQuestion       = jest.mocked(answerQuestion);
 const mockCancelWorkflow       = jest.mocked(cancelWorkflow);
@@ -163,10 +167,12 @@ beforeEach(() => {
   mockGetResumableInstance.mockResolvedValue(null);
   mockIsConfirmation.mockReturnValue(false);
   mockIsRejection.mockReturnValue(false);
+  mockIsWorkflowCancellation.mockReturnValue(false);
   mockGetHistory.mockReturnValue([]);
   mockGetOpenDemands.mockResolvedValue([]);
   mockGetDemands.mockResolvedValue([]);
   mockGetActiveWorkflows.mockResolvedValue([]);
+  mockGetWorkflowSteps.mockResolvedValue([]);
   mockClassify.mockResolvedValue(DEFAULT_CLASSIFICATION);
   mockMergeSummary.mockResolvedValue('Resumo mesclado');
   mockReply.mockResolvedValue('Resposta do bot');
@@ -187,9 +193,9 @@ beforeEach(() => {
 // ── Active workflow branch ─────────────────────────────────────────────────────
 
 describe('active workflow', () => {
-  test('rejection cancels the workflow and sends cancellation message', async () => {
+  test('cancellation keyword cancels the workflow and sends cancellation message', async () => {
     mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsRejection.mockReturnValue(true);
+    mockIsWorkflowCancellation.mockReturnValue(true);
 
     await handleMessage(BODY, SENDER, 'rt', sendFn);
 
@@ -198,9 +204,9 @@ describe('active workflow', () => {
     expect(captured[0]).toMatch(/cancelado/i);
   });
 
-  test('non-rejection routes body to answerQuestion', async () => {
+  test('non-cancellation routes body to answerQuestion', async () => {
     mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsRejection.mockReturnValue(false);
+    mockIsWorkflowCancellation.mockReturnValue(false);
 
     await handleMessage(BODY, SENDER, 'rt', sendFn);
 
@@ -209,7 +215,7 @@ describe('active workflow', () => {
 
   test('ask_question result sets active workflow and sends the prompt', async () => {
     mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsRejection.mockReturnValue(false);
+    mockIsWorkflowCancellation.mockReturnValue(false);
     mockAnswerQuestion.mockResolvedValue({
       action: 'ask_question', prompt: 'Qual o cargo?', variableName: 'cargo', instanceId: INSTANCE,
     });

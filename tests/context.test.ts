@@ -1,7 +1,7 @@
 import {
   getHistory, addTurn, clearHistory,
   setPendingAction, getPendingAction, clearPendingAction,
-  isConfirmation, isRejection,
+  isConfirmation, isRejection, isWorkflowCancellation,
   setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
   _reset
 } from '../src/ai/context';
@@ -195,5 +195,29 @@ describe('isRejection()', () => {
 
   test('returns false for an unrelated message', () => {
     expect(isRejection('paciente na cadeira 3')).toBe(false);
+  });
+});
+
+describe('isWorkflowCancellation()', () => {
+  test.each(['não', 'Não', 'nao', 'cancela', 'cancelar', 'para', 'desiste', 'n', 'não!', 'não.'])(
+    'returns true for standalone cancellation "%s"', (word) => {
+      expect(isWorkflowCancellation(word)).toBe(true);
+    }
+  );
+
+  test('returns false for "Não contratado" — workflow answer, not cancellation', () => {
+    expect(isWorkflowCancellation('Não contratado')).toBe(false);
+  });
+
+  test('returns false for "nao foi contratado"', () => {
+    expect(isWorkflowCancellation('nao foi contratado')).toBe(false);
+  });
+
+  test('returns false for "não é isso" — multi-word phrase', () => {
+    expect(isWorkflowCancellation('não é isso')).toBe(false);
+  });
+
+  test('returns false for a confirmation word', () => {
+    expect(isWorkflowCancellation('sim')).toBe(false);
   });
 });

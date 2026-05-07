@@ -47,7 +47,7 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
   Quando type não é "query", retorne queryFilters como null.
 - note: quando type é "add_note", o texto da nota a ser registrada (extraído literalmente da mensagem após os dois-pontos ou equivalente); null para outros tipos.
 - workflowId: quando type é "trigger_workflow", o id do workflow correspondente; null para outros tipos.
-- workflowVariables: quando type é "trigger_workflow", um objeto com as variáveis extraídas da mensagem (ex: {"name": "Frank"}); null para outros tipos.
+- workflowVariables: quando type é "trigger_workflow", um objeto com as variáveis extraídas da mensagem; as chaves devem ser os nomes de variável listados em cada workflow (ex: se o workflow lista variáveis "nome_colaborador", use {"nome_colaborador": "Frank"}); null para outros tipos.
 
 Use type "add_note" quando a mensagem pede para registrar uma observação, andamento ou nota em uma demanda existente.
 
@@ -64,15 +64,20 @@ Use type "discuss" quando a mensagem indica que a RT quer pensar, planejar, disc
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
 
-function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string; description: string }>): string {
+function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>): string {
   if (!activeWorkflows?.length) return BASE_CLASSIFY_PROMPT;
   const workflowList = activeWorkflows
-    .map(w => `  - id: "${w.id}", nome: "${w.name}", gatilho: "${w.description}"`)
+    .map(w => {
+      const base = `  - id: "${w.id}", nome: "${w.name}", gatilho: "${w.description}"`;
+      return w.variables?.length
+        ? `${base}, variáveis: ${w.variables.map(v => `"${v}"`).join(', ')}`
+        : base;
+    })
     .join('\n');
   return `${BASE_CLASSIFY_PROMPT}
 
 ## Workflows ativos
-Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis relevantes em workflowVariables:
+Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis relevantes em workflowVariables usando EXATAMENTE os nomes de variável listados:
 ${workflowList}`;
 }
 
@@ -95,7 +100,7 @@ export async function mergeSummary(existingSummary: string, newMessage: string):
 
 export async function classify(
   message: string,
-  activeWorkflows?: Array<{ id: string; name: string; description: string }>
+  activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>
 ): Promise<Classification> {
   try {
     const raw = await chat([
