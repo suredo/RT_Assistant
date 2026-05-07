@@ -1782,6 +1782,7 @@ result:    "Registrar admissão de Frank, cargo: Técnico de enfermagem"
 | `src/workflows/engine.ts` | Step execution orchestrator — returns `StepResult`, never touches WhatsApp | `tests/engine.test.ts` |
 | `src/workflows/manager.ts` | Natural-language workflow management (create/list/edit via WhatsApp) | `tests/manager.test.ts` |
 | `src/workflows/notifications.ts` | Cron dispatcher for scheduled notifications | `tests/notifications.test.ts` |
+| `src/help.ts` | Role-aware `formatHelp(role)` and `formatWelcome(role)` — pure functions, no side effects | `tests/help.test.ts` |
 
 ---
 
@@ -1789,8 +1790,8 @@ result:    "Registrar admissão de Frank, cargo: Técnico de enfermagem"
 
 | Module | Change |
 |---|---|
-| `src/ai/classifier.ts` | Add `trigger_workflow` and `manage_workflows` intent types; optional `activeWorkflows` param injected into prompt |
-| `src/ai/context.ts` | Add `advance_workflow` and `create_notification` PendingAction types; add in-memory `activeWorkflowMap` (Supabase is source of truth, map is a fast lookup cache) |
+| `src/ai/classifier.ts` | Add `trigger_workflow`, `manage_workflows`, `suggest_workflow`, `help`, `create_notification` intent types; `notificationContent` and `notificationScheduledAt` fields on `Classification`; optional `activeWorkflows` param injected into prompt |
+| `src/ai/context.ts` | Add `advance_workflow` and `create_notification` PendingAction types; add in-memory `activeWorkflowMap` (Supabase is source of truth, map is a fast lookup cache); add `greetedSenders` Set with `hasBeenGreeted()` / `markGreeted()` for onboarding |
 | `src/whatsapp/client.ts` | New decision order in message handler; new `handleStepResult()` helper; extend `executePendingAction()`; rehydrate workflow state on `ready` |
 
 **Message handler decision order (client.ts):**
@@ -1984,6 +1985,48 @@ Example: "Cancele o estágio de Fernando" triggers the internship workflow, but 
 #### Updated `/reset` Behavior in REPL
 
 The REPL `/reset` command now cancels all active workflow instances for the sender in Supabase (via `cancelAllActiveInstances(sender)` in `src/db/workflows.ts`), in addition to clearing in-memory state (conversation history, pending actions, active workflow map). This ensures stale Supabase instances from previous REPL sessions don't interfere with new tests.
+
+#### Help Intent & Role-Aware Capability List
+
+A `help` classifier intent fires when the user asks what the assistant can do ("ajuda", "o que você faz?", "como uso isso?"). The LLM distinguishes this from `discuss` — "me ajude a elaborar uma lista de materiais" is `discuss`, not `help`.
+
+Handler routes `help` → `formatHelp(role)` in `src/help.ts`:
+- **RT**: full list — demands, workflows, queries, update/resolve, notifications, discuss, workflow management
+- **Team**: demands, workflows, notes, notifications
+
+`formatHelp` and `formatWelcome` are pure exported functions with no side effects, fully unit-tested in `tests/help.test.ts`.
+
+#### Onboarding Welcome
+
+On the **first message per sender per session**, the handler sends `formatWelcome(role)` before processing the message normally:
+
+```
+Olá! 👋 Sou a Bianca, assistente da clínica.
+Diga *ajuda* a qualquer momento para ver o que posso fazer.
+```
+
+Tracked in `src/ai/context.ts` via `greetedSenders: Set<string>` with `hasBeenGreeted(sender)` and `markGreeted(sender)`. Cleared by `_reset()` — intentional, so returning users get an occasional reminder after bot restarts.
+
+#### Standalone Notifications (`create_notification` Classifier Intent)
+
+The `create_notification` **classifier intent** (distinct from the `create_notification` workflow step type) lets users create reminders directly without a workflow:
+
+```
+RT: "Me lembre amanhã às 9h de verificar os equipamentos"
+Bot: "🔔 Vou criar esta notificação:
+      Verificar os equipamentos
+      _(agendada para 08/05/2026 09:00)_
+
+      Confirma? (sim/não)"
+RT: "sim"
+Bot: "✅ Feito!"
+```
+
+The classifier extracts two fields:
+- `notificationContent: string | null` — the notification text
+- `notificationScheduledAt: string | null` — ISO 8601 datetime parsed from natural language (null if no time specified)
+
+The handler stages a `create_notification` PendingAction with `instanceId: null` (standalone, no workflow to advance). `executePendingAction` already handles this case — saves the notification and returns without calling `advanceAfterConfirmation`.
 
 ---
 
