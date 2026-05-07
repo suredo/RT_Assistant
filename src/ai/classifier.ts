@@ -69,13 +69,28 @@ Use type "discuss" quando a mensagem indica que a RT quer pensar, planejar, disc
 
 Use type "help" quando o usuário pergunta o que o assistente pode fazer — exemplos: "ajuda", "o que você faz?", "como uso isso?", "quais são suas funções?". Use "discuss" quando pedem ajuda para executar uma tarefa específica ("me ajude a elaborar...", "me ajuda a pensar...").
 
-Use type "create_notification" quando o usuário quer criar um lembrete ou notificação para si mesmo — exemplos: "me lembre amanhã às 9h de verificar os equipamentos", "cria uma notificação toda segunda às 8h sobre a escala". Preencha notificationContent com o texto do lembrete e notificationScheduledAt com o horário em ISO 8601 inferido da mensagem (null se não especificado).
+Use type "create_notification" quando o usuário quer criar um lembrete ou notificação para si mesmo, OU quando pede ao assistente para enviar alguma informação proativamente em um horário futuro. A REGRA DECISIVA: se a mensagem contém um especificador de tempo futuro ("em X minutos", "em X horas", "às HH:MM", "amanhã", "daqui a X", "daqui a pouco") junto com um pedido de envio ou lembrete, use SEMPRE "create_notification" — mesmo que a frase comece com "me mande" ou "me envie". Exemplos corretos:
+  - "me lembre amanhã às 9h de verificar os equipamentos" → create_notification
+  - "me mande as pendências em 1 minuto" → create_notification
+  - "me mande todas as demandas às 18:15" → create_notification
+  - "me envie um resumo amanhã às 8h" → create_notification
+  Contra-exemplos (NÃO são create_notification):
+  - "me mande as pendências" (sem tempo) → query
+  - "quais são as demandas abertas?" → query
+Preencha notificationContent com o texto do lembrete ou descrição do que deve ser enviado, e notificationScheduledAt com o horário em ISO 8601 calculado usando o CONTEXTO TEMPORAL no topo deste prompt (null se não houver horário especificado). Para horários relativos ("em 1 minuto", "em 30 minutos"), some ao datetime atual do CONTEXTO TEMPORAL.
 
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
 
-function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>): string {
-  if (!activeWorkflows?.length) return BASE_CLASSIFY_PROMPT;
+function buildClassifyPrompt(
+  activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>,
+  currentIso?: string
+): string {
+  const header = currentIso
+    ? `CONTEXTO TEMPORAL: Data e hora atuais = ${currentIso}. Use este valor como "hoje" e para calcular horários relativos ("em X minutos", "amanhã", "semana que vem"). NÃO use datas do seu treinamento.\n\n`
+    : '';
+  const prompt = header + BASE_CLASSIFY_PROMPT;
+  if (!activeWorkflows?.length) return prompt;
   const workflowList = activeWorkflows
     .map(w => {
       const base = `  - id: "${w.id}", nome: "${w.name}", gatilho: "${w.description}"`;
@@ -84,7 +99,7 @@ function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string;
         : base;
     })
     .join('\n');
-  return `${BASE_CLASSIFY_PROMPT}
+  return `${prompt}
 
 ## Workflows ativos
 Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis em workflowVariables usando EXATAMENTE os nomes de variável listados.
@@ -114,11 +129,12 @@ export async function mergeSummary(existingSummary: string, newMessage: string):
 
 export async function classify(
   message: string,
-  activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>
+  activeWorkflows?: Array<{ id: string; name: string; description: string; variables?: string[] }>,
+  currentIso?: string
 ): Promise<Classification> {
   try {
     const raw = await chat([
-      { role: 'system', content: buildClassifyPrompt(activeWorkflows) },
+      { role: 'system', content: buildClassifyPrompt(activeWorkflows, currentIso) },
       { role: 'user', content: message }
     ]);
 

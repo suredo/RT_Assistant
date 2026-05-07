@@ -657,12 +657,43 @@ describe('create_notification intent', () => {
       expect.objectContaining({ scheduledAt: isoTime }),
     );
   });
+
+  test('replaces demand-related content with the actual formatted demand list', async () => {
+    mockGetOpenDemands.mockResolvedValue([OPEN_DEMAND]);
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'todas as pendências em aberto',
+      notificationScheduledAt: null,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    const staged = mockSetPendingAction.mock.calls[0][1] as { content: string };
+    expect(staged.content).toContain('📋 Pendências em aberto:');
+    expect(staged.content).toContain('[demand preview]');
+  });
+
+  test('uses empty-demands message when demand-related notification has no open demands', async () => {
+    mockGetOpenDemands.mockResolvedValue([]);
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'todas as pendências',
+      notificationScheduledAt: null,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    const staged = mockSetPendingAction.mock.calls[0][1] as { content: string };
+    expect(staged.content).toContain('Nenhuma pendência em aberto');
+  });
 });
 
 // ── Onboarding welcome ────────────────────────────────────────────────────────
 
 describe('onboarding welcome', () => {
-  test('sends welcome on first message then continues processing', async () => {
+  test('sends only the welcome when first message is conversational (other/discuss)', async () => {
     mockHasBeenGreeted.mockReturnValue(false);
     mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'other' });
 
@@ -670,7 +701,18 @@ describe('onboarding welcome', () => {
 
     expect(mockMarkGreeted).toHaveBeenCalledWith(SENDER);
     expect(captured[0]).toBe('[welcome]');
-    // normal reply also happens
+    // welcome is the only reply — no second LLM greeting
+    expect(captured.length).toBe(1);
+  });
+
+  test('sends welcome AND still processes when first message has actionable content', async () => {
+    mockHasBeenGreeted.mockReturnValue(false);
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'query' });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(captured[0]).toBe('[welcome]');
+    // query type falls through to LLM — second message is the LLM answer
     expect(captured.length).toBeGreaterThan(1);
   });
 

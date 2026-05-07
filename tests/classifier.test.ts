@@ -100,6 +100,19 @@ describe('classify()', () => {
     await expect(classify('alguma mensagem')).resolves.toHaveProperty('category');
   });
 
+  test('injects current datetime into prompt when currentIso is provided', async () => {
+    mockChat.mockResolvedValue('{"type":"create_notification","category":"rotina","priority":"low","summary":"Pendências","demandIndex":null,"resolved":false,"queryFilters":null,"note":null,"workflowId":null,"workflowVariables":null,"notificationContent":"Pendências em aberto","notificationScheduledAt":"2026-05-07T17:15:00"}');
+
+    const iso = '2026-05-07T17:14:00';
+    await classify('me mande as pendências em 1 minuto', undefined, iso);
+
+    const systemPrompt = mockChat.mock.calls[0][0].find(
+      (m: { role: string }) => m.role === 'system'
+    )?.content as string;
+    expect(systemPrompt).toContain(iso);
+    expect(systemPrompt).toContain('CONTEXTO TEMPORAL');
+  });
+
   test('uses fallback values for missing JSON fields', async () => {
     mockChat.mockResolvedValue(JSON.stringify({ type: 'update' }));
 

@@ -169,9 +169,11 @@ export async function handleMessage(
   sendFn: (content: string) => Promise<void>,
 ): Promise<void> {
   // ── Onboarding welcome (first message per session) ───────────────────────
+  let sentWelcome = false;
   if (!hasBeenGreeted(senderNumber)) {
     markGreeted(senderNumber);
     await sendFn(formatWelcome(role));
+    sentWelcome = true;
     // continue — still process the original message normally
   }
 
@@ -316,7 +318,7 @@ export async function handleMessage(
   }
 
   // ── Classify ──────────────────────────────────────────────────────────────
-  const classification = await classify(body, activeWorkflows);
+  const classification = await classify(body, activeWorkflows, new Date().toISOString());
 
   // ── Trigger workflow ──────────────────────────────────────────────────────
   if (classification.type === 'trigger_workflow' && classification.workflowId) {
@@ -349,7 +351,17 @@ export async function handleMessage(
 
   // ── Standalone notification / reminder ────────────────────────────────────
   if (classification.type === 'create_notification') {
-    const content = classification.notificationContent ?? body;
+    let content = classification.notificationContent ?? body;
+    // If the notification is asking for the demands list, resolve it now so
+    // the stored content is the actual list, not the raw request string.
+    if (/pendên|demanda|aberta|pendente/i.test(content)) {
+      if (openDemands.length) {
+        const list = openDemands.map((d, i) => formatDemand(d, { index: i + 1 })).join('\n');
+        content = `📋 Pendências em aberto:\n${list}`;
+      } else {
+        content = '✅ Nenhuma pendência em aberto no momento.';
+      }
+    }
     const summary = content.length > 80 ? content.slice(0, 77) + '...' : content;
     const action: PendingAction = {
       type: 'create_notification',
@@ -432,6 +444,9 @@ export async function handleMessage(
 
   // ── LLM reply ─────────────────────────────────────────────────────────────
   if (classification.type === 'query') clearHistory(senderNumber);
+
+  // The onboarding welcome already serves as the response to a plain greeting.
+  if (sentWelcome && (classification.type === 'discuss' || classification.type === 'other')) return;
 
   let systemPrompt = role !== 'rt' ? TEAM_PROMPT
                    : classification.type === 'discuss' ? DISCUSS_PROMPT
