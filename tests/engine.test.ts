@@ -582,6 +582,80 @@ describe('triggerWorkflow() — send_message template resolution', () => {
 
 // ── systemVariables — auto-fill date placeholders ─────────────────────────────
 
+// ── Conditional step evaluation ────────────────────────────────────────────────
+
+describe('executeStep() — condition evaluation', () => {
+  const STEP_CONDITIONAL_TRUE = {
+    id: 'sc1', workflow_id: 'wf-1', step_order: 1,
+    step_type: 'send_message', content: 'Mensagem contratado',
+    condition: '{{situacao}} == contratado',
+  };
+  const STEP_CONDITIONAL_FALSE = {
+    id: 'sc2', workflow_id: 'wf-1', step_order: 1,
+    step_type: 'send_message', content: 'Mensagem não contratado',
+    condition: '{{situacao}} != contratado',
+  };
+
+  test('executes step when condition evaluates to true', async () => {
+    const instance = { ...INSTANCE, variables: { situacao: 'contratado' } };
+    mockCreate.mockResolvedValue(instance);
+    mockGetSteps.mockResolvedValue([STEP_CONDITIONAL_TRUE]);
+
+    const result = await triggerWorkflow('wf-1', '5511999', { situacao: 'contratado' });
+
+    expect(result.action).toBe('send_message');
+  });
+
+  test('skips step and completes workflow when condition is false and no next step', async () => {
+    const instance = { ...INSTANCE, variables: { situacao: 'não contratado' } };
+    mockCreate.mockResolvedValue(instance);
+    mockGetSteps.mockResolvedValue([STEP_CONDITIONAL_TRUE]);
+    mockAdvance.mockResolvedValue(undefined);
+    mockComplete.mockResolvedValue(undefined);
+
+    const result = await triggerWorkflow('wf-1', '5511999', { situacao: 'não contratado' });
+
+    expect(result.action).toBe('workflow_complete');
+    expect(mockComplete).toHaveBeenCalled();
+  });
+
+  test('skips step and advances to next when condition is false', async () => {
+    const instance = { ...INSTANCE, variables: { situacao: 'não contratado' } };
+    mockCreate.mockResolvedValue(instance);
+    // Step 1: conditional (false), Step 2: unconditional ask_question
+    mockGetSteps.mockResolvedValue([
+      STEP_CONDITIONAL_TRUE,
+      { ...STEP_ASK, step_order: 2 },
+    ]);
+    mockAdvance.mockResolvedValue(undefined);
+
+    const result = await triggerWorkflow('wf-1', '5511999', { situacao: 'não contratado' });
+
+    // Step 1 skipped, step 2 (ask_question) executed
+    expect(result.action).toBe('ask_question');
+  });
+
+  test('condition is case-insensitive', async () => {
+    const instance = { ...INSTANCE, variables: { situacao: 'Contratado' } };
+    mockCreate.mockResolvedValue(instance);
+    mockGetSteps.mockResolvedValue([STEP_CONDITIONAL_TRUE]); // condition == "contratado"
+
+    const result = await triggerWorkflow('wf-1', '5511999', { situacao: 'Contratado' });
+
+    // "Contratado" == "contratado" should match (case-insensitive)
+    expect(result.action).toBe('send_message');
+  });
+
+  test('step without condition always executes', async () => {
+    mockCreate.mockResolvedValue(INSTANCE);
+    mockGetSteps.mockResolvedValue([STEP_SEND]); // no condition
+
+    const result = await triggerWorkflow('wf-1', '5511999', {});
+
+    expect(result.action).toBe('send_message');
+  });
+});
+
 describe('systemVariables — auto-fill placeholders', () => {
   test('passes data_atual, hora_atual, data_hora_atual, and data alias to interpolate on every step', async () => {
     jest.clearAllMocks();

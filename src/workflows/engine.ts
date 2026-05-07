@@ -44,6 +44,23 @@ export type StepResult =
   | { action: 'workflow_unclear';     prompt: string; instanceId: string }
   | { action: 'error';               message: string }
 
+// ── Condition evaluation ───────────────────────────────────────────────────────
+// Supports: {{variable}} == value  |  {{variable}} != value
+// Comparison is case-insensitive. Unknown variables resolve to empty string.
+// Returns true (execute step) when condition is absent or cannot be parsed.
+
+function evaluateCondition(condition: string, vars: Record<string, string>): boolean {
+  const resolved = condition.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+
+  const eq  = resolved.match(/^(.*?)\s*==\s*(.*)$/);
+  if (eq)  return eq[1].trim().toLowerCase() === eq[2].trim().toLowerCase();
+
+  const neq = resolved.match(/^(.*?)\s*!=\s*(.*)$/);
+  if (neq) return neq[1].trim().toLowerCase() !== neq[2].trim().toLowerCase();
+
+  return true; // unrecognised syntax → don't skip
+}
+
 // ── Answer evaluation ──────────────────────────────────────────────────────────
 // Determines whether a user message is a valid answer to the current workflow
 // question, an explicit cancellation, or something unclear that needs clarification.
@@ -88,6 +105,18 @@ async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
   // System variables are available to every step; instance variables (user answers)
   // override them when there is a name collision.
   const vars = { ...systemVariables(), ...(instance.variables as Record<string, string>) };
+
+  // Skip step if its condition evaluates to false.
+  if (step.condition && !evaluateCondition(step.condition, vars)) {
+    const nextOrder = instance.current_step_order + 1;
+    if (!steps.some(s => s.step_order === nextOrder)) {
+      await completeInstance(instance.id);
+      return { action: 'workflow_complete', summary: '✅ Fluxo concluído.' };
+    }
+    await advanceInstance(instance.id, nextOrder, instance.variables as Record<string, string>);
+    return executeStep({ ...instance, current_step_order: nextOrder });
+  }
+
   const content = interpolate(step.content, vars);
 
   if (step.step_type === 'send_message') {

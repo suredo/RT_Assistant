@@ -56,6 +56,7 @@ export function setupTestDb(): void {
       content TEXT NOT NULL,
       variable_name TEXT,
       template_id TEXT,
+      condition TEXT,
       UNIQUE (workflow_id, step_order)
     );
 
@@ -187,9 +188,9 @@ export async function getWorkflowSteps(workflowId: string): Promise<WorkflowStep
 export async function createWorkflowStep(step: Omit<WorkflowStep, 'id'>): Promise<WorkflowStep> {
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO workflow_steps (id, workflow_id, step_order, step_type, content, variable_name, template_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, step.workflow_id, step.step_order, step.step_type, step.content, step.variable_name ?? null, step.template_id ?? null);
+    INSERT INTO workflow_steps (id, workflow_id, step_order, step_type, content, variable_name, template_id, condition)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, step.workflow_id, step.step_order, step.step_type, step.content, step.variable_name ?? null, step.template_id ?? null, step.condition ?? null);
   return { id, ...step };
 }
 

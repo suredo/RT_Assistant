@@ -25,6 +25,7 @@ export interface WorkflowStep {
   content: string;
   variable_name?: string;
   template_id?: string;
+  condition?: string; // e.g. "{{situacao_final}} == contratado" — step skipped if false
 }
 
 export interface MessageTemplate {

@@ -77,7 +77,11 @@ function buildClassifyPrompt(activeWorkflows?: Array<{ id: string; name: string;
   return `${BASE_CLASSIFY_PROMPT}
 
 ## Workflows ativos
-Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis relevantes em workflowVariables usando EXATAMENTE os nomes de variável listados:
+Se a mensagem corresponder a um dos workflows abaixo, use type "trigger_workflow", preencha workflowId com o id correspondente e extraia as variáveis em workflowVariables usando EXATAMENTE os nomes de variável listados.
+REGRAS para workflowVariables:
+- Inclua SOMENTE valores explicitamente declarados na mensagem (ex: "João foi contratado" → extraia o nome e a situação).
+- NÃO infira valores a partir do verbo de acionamento (ex: "Cancele o estágio de X" ou "Inicie o processo de Y" NÃO implicam variáveis além do nome/identificador).
+- Se um valor não estiver claramente declarado, OMITA essa chave — o workflow perguntará ao usuário.
 ${workflowList}`;
 }
 

@@ -15,6 +15,7 @@ export interface StepDef {
   template_content?: string; // for send_message: full message text (in-memory until confirmed)
   template_exists?: boolean; // true if a template with this name was found in DB
   variable_name?: string;
+  condition?: string;        // e.g. "{{situacao_final}} == contratado" — step skipped if false
 }
 
 export interface ManageCommand {
@@ -48,6 +49,13 @@ const STEP_TYPES =
   '"create_demand" (cria uma demanda após confirmação do usuário), ' +
   '"create_notification" (cria uma notificação após confirmação do usuário)';
 
+const CONDITION_RULE =
+  '- condition: (opcional) condição booleana para executar o passo — sintaxe: ' +
+  '"{{variavel}} == valor" ou "{{variavel}} != valor" (comparação case-insensitive). ' +
+  'Se a condição for false, o passo é ignorado automaticamente. ' +
+  'Use para enviar templates diferentes com base na situação (ex: dois send_message consecutivos: ' +
+  'um com condition "{{situacao_final}} == contratado" e outro com condition "{{situacao_final}} != contratado").';
+
 const MANAGER_PROMPT = `Você é um assistente para gerenciar workflows de uma clínica de hemodiálise.
 Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
 - operation: "list" | "create" | "edit" | "toggle" | "unknown"
@@ -60,6 +68,7 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
   - content: para "send_message": nome curto do template (ex: "Onboarding — boas-vindas"); para outros tipos: texto completo com {{variavel}}
   - template_content: (somente para "send_message") texto completo da mensagem com {{variáveis}}
   - variable_name: nome da variável a capturar (somente para ask_question)
+  - condition: (opcional) ${CONDITION_RULE}
 
 REGRAS IMPORTANTES PARA STEPS:
 - Para "send_message": use SEMPRE dois campos separados — "content" com o nome curto do template (ex: "Contratação — divulgação RH") e "template_content" com o texto completo da mensagem. Nunca coloque o texto completo em "content".
@@ -87,6 +96,7 @@ Aplique a modificação e retorne SOMENTE um JSON válido com os campos:
   - content: para "send_message": nome curto do template; para outros: texto completo com {{variavel}}
   - template_content: (somente para "send_message") texto completo da mensagem com {{variáveis}}
   - variable_name: nome da variável a capturar (somente para ask_question)
+  - condition: (opcional) ${CONDITION_RULE}
 
 REGRAS:
 - Retorne SEMPRE a lista completa de passos — nunca retorne apenas os passos afetados.
@@ -103,7 +113,7 @@ REGRAS:
 async function parseModification(message: string, existingCmd: ManageCommand): Promise<ManageCommand> {
   const stepsText = (existingCmd.steps ?? [])
     .map(s => {
-      const base = `  ${s.step_order}. ${s.step_type}: ${s.content}${s.variable_name ? ` → {{${s.variable_name}}}` : ''}`;
+      const base = `  ${s.step_order}. ${s.step_type}: ${s.content}${s.variable_name ? ` → {{${s.variable_name}}}` : ''}${s.condition ? ` [condition: ${s.condition}]` : ''}`;
       return s.template_content ? `${base}\n     template_content: ${s.template_content}` : base;
     })
     .join('\n');
@@ -199,16 +209,18 @@ function formatStepType(stepType: string): string {
 function formatWorkflowPreview(cmd: ManageCommand): string {
   const steps = cmd.steps ?? [];
   const stepLines = steps.map((s, i) => {
+    const conditionTag = s.condition ? ` _[se: ${s.condition}]_` : '';
     if (s.step_type === 'send_message') {
       const badge = s.template_exists ? '_(existente)_' : '_(novo)_';
       const contentBlock = s.template_content
         ? `\n     📄 _Conteúdo:_\n${s.template_content.split('\n').map(l => `     ${l}`).join('\n')}`
         : '';
-      return `  ${i + 1}. 📤 Template: *${s.content}* ${badge}${contentBlock}`;
+      return `  ${i + 1}. 📤 Template: *${s.content}* ${badge}${conditionTag}${contentBlock}`;
     }
     const label = formatStepType(s.step_type);
     const base  = `  ${i + 1}. ${label}: ${s.content}`;
-    return s.variable_name ? `${base} → {{${s.variable_name}}}` : base;
+    const withVar = s.variable_name ? `${base} → {{${s.variable_name}}}` : base;
+    return conditionTag ? `${withVar}${conditionTag}` : withVar;
   }).join('\n');
 
   const isCreate = cmd.operation === 'create';
@@ -250,6 +262,7 @@ async function saveSteps(workflowId: string, steps: StepDef[]): Promise<void> {
       content: s.content,
       variable_name: s.variable_name,
       template_id,
+      condition: s.condition,
     });
   }
 }
