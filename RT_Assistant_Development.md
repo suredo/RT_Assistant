@@ -1698,11 +1698,17 @@ CREATE TABLE workflow_steps (
   content       text NOT NULL,
   variable_name text,
   template_id   uuid REFERENCES message_templates(id) ON DELETE SET NULL,
+  condition     text,
   UNIQUE (workflow_id, step_order)
 );
 CREATE INDEX ON workflow_steps (workflow_id, step_order);
 ```
 `step_type` is open text — validated in the engine, not the DB, so new types can be added without migrations.
+
+`condition` uses `{{variable}} == value` / `{{variable}} != value` syntax; the step is skipped when the condition evaluates to false. Migration for existing deployments:
+```sql
+ALTER TABLE workflow_steps ADD COLUMN condition TEXT;
+```
 
 #### 4. `workflow_instances`
 ```sql
@@ -1804,12 +1810,14 @@ result:    "Registrar admissão de Frank, cargo: Técnico de enfermagem"
 
 ```typescript
 type StepResult =
-  | { action: 'send_message';         content: string }
-  | { action: 'ask_question';         prompt: string; variableName: string }
+  | { action: 'send_message';         content: string; instanceId: string }
+  | { action: 'ask_question';         prompt: string; variableName: string; instanceId: string }
   | { action: 'confirm_demand';       pendingAction: PendingAction; confirmPrompt: string }
   | { action: 'confirm_notification'; pendingAction: PendingAction; confirmPrompt: string }
   | { action: 'workflow_complete';    summary: string }
   | { action: 'workflow_cancelled' }
+  | { action: 'workflow_unclear';     prompt: string; instanceId: string }
+  | { action: 'error';               message: string }
 ```
 
 ---
@@ -1899,8 +1907,9 @@ The engine automatically injects three date/time variables into every step's int
 | `{{data_atual}}` | Today's date in pt-BR | `02/05/2026` |
 | `{{hora_atual}}` | Current time HH:MM | `14:30` |
 | `{{data_hora_atual}}` | Date + time combined | `02/05/2026 14:30` |
+| `{{data}}` | Alias for `{{data_atual}}` | `02/05/2026` |
 
-Timezone: `America/Sao_Paulo`. Instance variables (captured from trigger or `ask_question`) override system variables if the same key name is used. No configuration needed — any step can use these placeholders.
+Timezone: `America/Sao_Paulo`. Instance variables (captured from trigger or `ask_question`) override system variables if the same key name is used. No configuration needed — any step can use these placeholders. `{{data}}` is kept as an alias because LLMs frequently generate it instead of `{{data_atual}}`.
 
 #### `getResumableInstance()` — Safe Lazy Rehydration
 
@@ -1930,6 +1939,47 @@ If a variable captured from the trigger message already satisfies an `ask_questi
 Trigger: "Frank foi contratado"
 Engine: variable 'name' = 'Frank' — skip ask_question step "Qual o nome do novo funcionário?"
 ```
+
+#### Conditional Steps
+
+Steps can be conditionally skipped using an optional `condition` expression on the `WorkflowStep`:
+
+- Syntax: `{{variable_name}} == value` or `{{variable_name}} != value`
+- Comparison is case-insensitive
+- When the condition evaluates to false, the engine skips the step and advances automatically
+- When absent, the step always executes
+
+**Use case:** send different `send_message` templates depending on the outcome of an `ask_question` step.
+
+```
+step 1: ask_question  "Qual a situação final do estágio?"  → variable_name: situacao_final
+step 2: send_message  [hired template]    condition: {{situacao_final}} == contratado
+step 3: send_message  [not-hired template] condition: {{situacao_final}} != contratado
+```
+
+The manager LLM (`MANAGER_PROMPT` / `MODIFY_PROMPT`) understands this syntax and populates `condition` when the user describes branching logic ("se contratado, envie X; se não, envie Y").
+
+#### LLM-Based Answer Evaluation
+
+When a workflow is waiting for an `ask_question` answer, each incoming message is evaluated by the LLM (via `evaluateAnswer()` in `src/workflows/engine.ts`) before being stored as a variable. This replaces the previous keyword-based cancellation check.
+
+Three outcomes:
+
+| Result | Trigger | Engine action |
+|---|---|---|
+| `answer` | Any plausible response — names, dates, "Sim", "Não", descriptions | Store as variable, advance |
+| `cancel` | Explicit cancellation ("cancelar fluxo", "sair do processo", "para tudo") | Cancel instance |
+| `unclear` | Message clearly does not answer the question and is not cancellation | Return `workflow_unclear`, re-prompt |
+
+**Key rule:** "Não" as an answer to a yes/no question is always `answer`, not `cancel`. Only an explicit "cancelar fluxo" or equivalent triggers cancellation.
+
+`workflow_unclear` keeps the instance active and re-prompts the RT with the original question and an instruction to answer or type "cancelar fluxo".
+
+#### Classifier Trigger-Verb Extraction Rule
+
+The classifier prompt (`buildClassifyPrompt` in `src/ai/classifier.ts`) has an explicit rule: `workflowVariables` must only be populated with values **declared in the message**, never inferred from the trigger action verb.
+
+Example: "Cancele o estágio de Fernando" triggers the internship workflow, but must **not** extract `situacao_final = cancelado` — "Cancele" is the trigger verb, not a declared value. The workflow will ask `situacao_final` at the appropriate step. This prevents the engine from auto-skipping question steps the user hasn't actually answered.
 
 #### Updated `/reset` Behavior in REPL
 
