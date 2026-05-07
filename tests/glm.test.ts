@@ -19,6 +19,57 @@ describe('DISCUSS_PROMPT', () => {
   });
 });
 
+// ── Prompt behavioral contracts ────────────────────────────────────────────────
+// Assert key clauses in each exported prompt so edits that accidentally remove
+// a behavioral constraint are caught immediately without running the real LLM.
+
+describe('SYSTEM_PROMPT — behavioral contract', () => {
+  test('identifies the assistant as Bianca', () => {
+    expect(SYSTEM_PROMPT).toContain('Bianca');
+  });
+
+  test('requires confirmation before taking actions', () => {
+    expect(SYSTEM_PROMPT).toMatch(/confirma|confirmação/i);
+  });
+
+  test('communicates in Portuguese', () => {
+    expect(SYSTEM_PROMPT).toMatch(/português/i);
+  });
+
+  test('is distinct from DISCUSS_PROMPT and TEAM_PROMPT', () => {
+    expect(SYSTEM_PROMPT).not.toBe(DISCUSS_PROMPT);
+    expect(SYSTEM_PROMPT).not.toBe(TEAM_PROMPT);
+  });
+});
+
+describe('DISCUSS_PROMPT — behavioral contract', () => {
+  test('enables collaborative thinking mode', () => {
+    expect(DISCUSS_PROMPT).toMatch(/colaborativ|pensar|discutir/i);
+  });
+
+  test('explicitly restricts taking actions without explicit user confirmation', () => {
+    expect(DISCUSS_PROMPT).toMatch(/NÃO registre|não registre/i);
+  });
+
+  test('communicates in Portuguese', () => {
+    expect(DISCUSS_PROMPT).toMatch(/português/i);
+  });
+});
+
+describe('TEAM_PROMPT — behavioral contract', () => {
+  test('restricts capability to demand registration only', () => {
+    expect(TEAM_PROMPT).toMatch(/APENAS/i);
+  });
+
+  test('does not grant workflow management capabilities', () => {
+    expect(TEAM_PROMPT).not.toMatch(/workflow/i);
+  });
+
+  test('uses priority emojis for feedback', () => {
+    expect(TEAM_PROMPT).toContain('🔴');
+  });
+});
+
 describe('chat()', () => {
   test('returns LLM content on success', async () => {
     mockPost.mockResolvedValue({

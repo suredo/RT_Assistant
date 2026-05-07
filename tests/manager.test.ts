@@ -594,3 +594,91 @@ describe('manager prompt — send_message constraint', () => {
     expect(systemMsg?.content).toContain('Rascunho para encaminhar');
   });
 });
+
+// ── Prompt structural contracts ────────────────────────────────────────────────
+
+describe('MANAGER_PROMPT — structural contract', () => {
+  const STEP_TYPES = ['send_message', 'ask_question', 'create_demand', 'create_notification'];
+  const OPERATIONS  = ['list', 'create', 'edit', 'toggle', 'unknown'];
+
+  let promptContent: string;
+
+  beforeAll(async () => {
+    jest.clearAllMocks();
+    mockGetTemplateByName.mockResolvedValue(null);
+    mockChat.mockResolvedValue(JSON.stringify({ operation: 'unknown' }));
+    await handleManageWorkflows('test message');
+    const msgs = mockChat.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    promptContent = msgs.find(m => m.role === 'system')!.content;
+  });
+
+  test.each(STEP_TYPES)('defines step_type "%s"', (t) => {
+    expect(promptContent).toContain(`"${t}"`);
+  });
+
+  test.each(OPERATIONS)('defines operation "%s"', (op) => {
+    expect(promptContent).toContain(`"${op}"`);
+  });
+
+  test('requires JSON-only response', () => {
+    expect(promptContent).toMatch(/somente.*json|json.*somente/i);
+  });
+
+  test('instructs send_message uses content (name) and template_content (text) as separate fields', () => {
+    expect(promptContent).toContain('template_content');
+    expect(promptContent).toContain('content');
+  });
+
+  test('states bot does not send to third parties', () => {
+    expect(promptContent).toContain('NÃO envia para terceiros');
+  });
+
+  test('instructs draft prefix for third-party destinations', () => {
+    expect(promptContent).toContain('Rascunho para encaminhar');
+  });
+});
+
+describe('MODIFY_PROMPT — structural contract', () => {
+  const existingCmdForPromptTest = {
+    operation: 'create' as const,
+    name: 'Test',
+    description: 'Gatilho',
+    steps: [{ step_order: 1, step_type: 'ask_question', content: 'Pergunta?', variable_name: 'resp' }],
+  };
+
+  let promptContent: string;
+
+  beforeAll(async () => {
+    jest.clearAllMocks();
+    mockGetTemplateByName.mockResolvedValue(null);
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Test',
+      description: 'Gatilho',
+      steps: existingCmdForPromptTest.steps,
+    }));
+    await modifyManageCommand('teste', existingCmdForPromptTest);
+    const msgs = mockChat.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    promptContent = msgs.find(m => m.role === 'system')!.content;
+  });
+
+  test('instructs to return the complete step list, not just affected steps', () => {
+    expect(promptContent).toMatch(/lista completa|LISTA COMPLETA/i);
+  });
+
+  test('instructs to renumber step_order after insertions or deletions', () => {
+    expect(promptContent).toMatch(/renumere|step_order/i);
+  });
+
+  test('instructs to preserve unaffected steps exactly', () => {
+    expect(promptContent).toMatch(/não afetados|mantidos|mantenha/i);
+  });
+
+  test('requires JSON-only response', () => {
+    expect(promptContent).toMatch(/somente.*json|json.*somente/i);
+  });
+
+  test('instructs operation must match the original', () => {
+    expect(promptContent).toMatch(/mesmo.*opera|opera.*original/i);
+  });
+});

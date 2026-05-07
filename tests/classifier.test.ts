@@ -359,6 +359,101 @@ describe('classify() — discuss intent', () => {
   });
 });
 
+// ── Prompt structural contracts ────────────────────────────────────────────────
+// These tests capture the actual system prompt sent to the LLM and assert that
+// all key behavioral clauses are present. They catch accidental deletions and
+// regressions introduced when editing prompts.
+
+describe('BASE_CLASSIFY_PROMPT — structural contract', () => {
+  const ALL_INTENTS = [
+    'new_demand', 'update', 'query', 'add_note',
+    'trigger_workflow', 'manage_workflows', 'suggest_workflow', 'discuss', 'other',
+  ];
+  const ALL_CATEGORIES = [
+    'urgência clínica', 'gestão de equipe', 'equipe médica',
+    'administrativo', 'regulatório', 'rotina',
+  ];
+
+  let promptContent: string;
+
+  beforeAll(async () => {
+    jest.clearAllMocks();
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'other', category: 'rotina', priority: 'low', summary: 'x',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+    }));
+    await classify('test');
+    const msgs = mockChat.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    promptContent = msgs.find(m => m.role === 'system')!.content;
+  });
+
+  test.each(ALL_INTENTS)('defines intent "%s"', (intent) => {
+    expect(promptContent).toContain(`"${intent}"`);
+  });
+
+  test.each(ALL_CATEGORIES)('defines category "%s"', (cat) => {
+    expect(promptContent).toContain(`"${cat}"`);
+  });
+
+  test('requires JSON-only response', () => {
+    expect(promptContent).toMatch(/somente.*json|json.*somente/i);
+  });
+
+  test('defines queryFilters with status, category and priority fields', () => {
+    expect(promptContent).toContain('queryFilters');
+    expect(promptContent).toContain('status');
+    expect(promptContent).toContain('category');
+  });
+
+  test('defines suggest_workflow for recurring processes', () => {
+    expect(promptContent).toContain('suggest_workflow');
+    expect(promptContent).toContain('recorrente');
+  });
+
+  test('defines discuss for planning/opinion messages', () => {
+    expect(promptContent).toContain('discuss');
+    expect(promptContent).toContain('pensar');
+  });
+
+  test('manage_workflows must take priority over new_demand', () => {
+    expect(promptContent).toContain('manage_workflows');
+    expect(promptContent).toContain('new_demand');
+  });
+
+  test('defines trigger_workflow with workflowId and workflowVariables fields', () => {
+    expect(promptContent).toContain('workflowId');
+    expect(promptContent).toContain('workflowVariables');
+  });
+});
+
+describe('MERGE_PROMPT — structural contract', () => {
+  let promptContent: string;
+
+  beforeAll(async () => {
+    jest.clearAllMocks();
+    mockChat.mockResolvedValue('Resumo combinado');
+    await mergeSummary('Resumo A', 'nova info');
+    const msgs = mockChat.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    promptContent = msgs.find(m => m.role === 'system')!.content;
+  });
+
+  test('instructs to combine and preserve, not replace existing context', () => {
+    expect(promptContent).toContain('Combine');
+    expect(promptContent).toMatch(/preserve|acrescente/i);
+    // The prohibition "não substitua" must be present (not "replace, do substitute")
+    expect(promptContent).toMatch(/não substitua/i);
+  });
+
+  test('caps merged summary at 120 characters', () => {
+    expect(promptContent).toContain('120');
+  });
+
+  test('requires Portuguese output', () => {
+    expect(promptContent).toContain('português');
+  });
+});
+
 describe('mergeSummary()', () => {
   beforeEach(() => jest.clearAllMocks());
 
