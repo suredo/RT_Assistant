@@ -19,18 +19,17 @@ jest.mock('../src/ai/classifier', () => ({
 }));
 
 jest.mock('../src/ai/context', () => ({
-  getHistory:               jest.fn(),
-  addTurn:                  jest.fn(),
-  clearHistory:             jest.fn(),
-  getPendingAction:         jest.fn(),
-  setPendingAction:         jest.fn(),
-  clearPendingAction:       jest.fn(),
-  isConfirmation:           jest.fn(),
-  isRejection:              jest.fn(),
-  isWorkflowCancellation:   jest.fn(),
-  setActiveWorkflow:        jest.fn(),
-  getActiveWorkflow:        jest.fn(),
-  clearActiveWorkflow:      jest.fn(),
+  getHistory:          jest.fn(),
+  addTurn:             jest.fn(),
+  clearHistory:        jest.fn(),
+  getPendingAction:    jest.fn(),
+  setPendingAction:    jest.fn(),
+  clearPendingAction:  jest.fn(),
+  isConfirmation:      jest.fn(),
+  isRejection:         jest.fn(),
+  setActiveWorkflow:   jest.fn(),
+  getActiveWorkflow:   jest.fn(),
+  clearActiveWorkflow: jest.fn(),
 }));
 
 jest.mock('../src/db/supabase', () => ({
@@ -75,7 +74,7 @@ import { classify, mergeSummary } from '../src/ai/classifier';
 import {
   getActiveWorkflow, setActiveWorkflow, clearActiveWorkflow,
   getPendingAction, setPendingAction, clearPendingAction,
-  isConfirmation, isRejection, isWorkflowCancellation,
+  isConfirmation, isRejection,
   getHistory,
 } from '../src/ai/context';
 import { getOpenDemands, getDemands } from '../src/db/supabase';
@@ -99,10 +98,9 @@ const mockClearActiveWorkflow  = jest.mocked(clearActiveWorkflow);
 const mockGetPendingAction     = jest.mocked(getPendingAction);
 const mockSetPendingAction     = jest.mocked(setPendingAction);
 const mockClearPendingAction   = jest.mocked(clearPendingAction);
-const mockIsConfirmation            = jest.mocked(isConfirmation);
-const mockIsRejection               = jest.mocked(isRejection);
-const mockIsWorkflowCancellation    = jest.mocked(isWorkflowCancellation);
-const mockGetHistory                = jest.mocked(getHistory);
+const mockIsConfirmation       = jest.mocked(isConfirmation);
+const mockIsRejection          = jest.mocked(isRejection);
+const mockGetHistory           = jest.mocked(getHistory);
 const mockGetOpenDemands            = jest.mocked(getOpenDemands);
 const mockGetDemands                = jest.mocked(getDemands);
 const mockGetActiveWorkflows        = jest.mocked(getActiveWorkflows);
@@ -167,7 +165,6 @@ beforeEach(() => {
   mockGetResumableInstance.mockResolvedValue(null);
   mockIsConfirmation.mockReturnValue(false);
   mockIsRejection.mockReturnValue(false);
-  mockIsWorkflowCancellation.mockReturnValue(false);
   mockGetHistory.mockReturnValue([]);
   mockGetOpenDemands.mockResolvedValue([]);
   mockGetDemands.mockResolvedValue([]);
@@ -193,29 +190,40 @@ beforeEach(() => {
 // ── Active workflow branch ─────────────────────────────────────────────────────
 
 describe('active workflow', () => {
-  test('cancellation keyword cancels the workflow and sends cancellation message', async () => {
+  test('routes all messages to answerQuestion — cancellation is handled by the engine', async () => {
     mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsWorkflowCancellation.mockReturnValue(true);
-
-    await handleMessage(BODY, SENDER, 'rt', sendFn);
-
-    expect(mockCancelWorkflow).toHaveBeenCalledWith(INSTANCE);
-    expect(mockClearActiveWorkflow).toHaveBeenCalledWith(SENDER);
-    expect(captured[0]).toMatch(/cancelado/i);
-  });
-
-  test('non-cancellation routes body to answerQuestion', async () => {
-    mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsWorkflowCancellation.mockReturnValue(false);
 
     await handleMessage(BODY, SENDER, 'rt', sendFn);
 
     expect(mockAnswerQuestion).toHaveBeenCalledWith(INSTANCE, BODY);
   });
 
+  test('workflow_cancelled result from engine clears active workflow and sends cancellation message', async () => {
+    mockGetActiveWorkflow.mockReturnValue(INSTANCE);
+    mockAnswerQuestion.mockResolvedValue({ action: 'workflow_cancelled' });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockClearActiveWorkflow).toHaveBeenCalledWith(SENDER);
+    expect(captured[0]).toMatch(/cancelado/i);
+  });
+
+  test('workflow_unclear result keeps active workflow and sends clarification prompt', async () => {
+    mockGetActiveWorkflow.mockReturnValue(INSTANCE);
+    mockAnswerQuestion.mockResolvedValue({
+      action: 'workflow_unclear',
+      prompt: 'Não consegui interpretar. Pergunta: Qual o nome?',
+      instanceId: INSTANCE,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockSetActiveWorkflow).toHaveBeenCalledWith(SENDER, INSTANCE);
+    expect(captured[0]).toMatch(/Não consegui interpretar/i);
+  });
+
   test('ask_question result sets active workflow and sends the prompt', async () => {
     mockGetActiveWorkflow.mockReturnValue(INSTANCE);
-    mockIsWorkflowCancellation.mockReturnValue(false);
     mockAnswerQuestion.mockResolvedValue({
       action: 'ask_question', prompt: 'Qual o cargo?', variableName: 'cargo', instanceId: INSTANCE,
     });

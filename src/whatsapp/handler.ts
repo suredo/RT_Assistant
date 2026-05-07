@@ -12,7 +12,7 @@ import { classify, mergeSummary } from '../ai/classifier';
 import {
   getHistory, addTurn, clearHistory,
   getPendingAction, setPendingAction, clearPendingAction,
-  isConfirmation, isRejection, isWorkflowCancellation,
+  isConfirmation, isRejection,
   setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
   PendingAction
 } from '../ai/context';
@@ -116,6 +116,10 @@ async function handleStepResult(
   } else if (result.action === 'workflow_cancelled') {
     clearActiveWorkflow(sender);
     await sendFn('❌ Fluxo cancelado.');
+  } else if (result.action === 'workflow_unclear') {
+    // Keep the active workflow — user just needs to clarify their answer
+    setActiveWorkflow(sender, result.instanceId);
+    await sendFn(result.prompt);
   } else if (result.action === 'error') {
     await sendFn(`⚠️ ${result.message}`);
   }
@@ -181,14 +185,8 @@ export async function handleMessage(
     }
   }
   if (activeInstanceId) {
-    // Use the stricter cancellation check so answers like "Não contratado"
-    // are forwarded to the engine instead of aborting the workflow.
-    if (isWorkflowCancellation(body)) {
-      await cancelWorkflow(activeInstanceId);
-      clearActiveWorkflow(senderNumber);
-      await sendFn('❌ Fluxo cancelado. Como posso ajudar?');
-      return;
-    }
+    // No keyword-based cancellation here — answerQuestion() uses the LLM to
+    // evaluate whether the answer is valid, an explicit cancel, or unclear.
     const result = await answerQuestion(activeInstanceId, body);
     await handleStepResult(result, senderNumber, sendFn);
     return;

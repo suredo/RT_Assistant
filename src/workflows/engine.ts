@@ -10,6 +10,7 @@ import {
   WorkflowInstance,
 } from '../db/workflows';
 import { interpolate } from './interpolate';
+import { chat } from '../ai/glm';
 
 // ── System variables ───────────────────────────────────────────────────────────
 // Built-in placeholders available in every step content without needing an
@@ -40,7 +41,40 @@ export type StepResult =
   | { action: 'confirm_notification'; pendingAction: PendingAction; confirmPrompt: string }
   | { action: 'workflow_complete';    summary: string }
   | { action: 'workflow_cancelled' }
+  | { action: 'workflow_unclear';     prompt: string; instanceId: string }
   | { action: 'error';               message: string }
+
+// ── Answer evaluation ──────────────────────────────────────────────────────────
+// Determines whether a user message is a valid answer to the current workflow
+// question, an explicit cancellation, or something unclear that needs clarification.
+
+const ANSWER_EVAL_PROMPT =
+  'Você está auxiliando num workflow de uma clínica de hemodiálise. ' +
+  'Dado a pergunta atual do fluxo e a resposta do usuário, classifique:\n' +
+  '- "answer": qualquer resposta plausível — nomes, datas, "Sim", "Não", situações, ' +
+  'descrições. NA DÚVIDA use "answer". "Não" como resposta a pergunta de sim/não ou situação é SEMPRE "answer".\n' +
+  '- "cancel": pedido EXPLÍCITO de cancelar/sair/parar o fluxo ' +
+  '(ex: "cancelar fluxo", "sair do processo", "para tudo", "quero sair").\n' +
+  '- "unclear": mensagem que claramente não responde à pergunta E não é cancelamento ' +
+  '(ex: pergunta sobre outro assunto, mensagem enviada por engano).\n' +
+  'Retorne SOMENTE JSON: {"type":"answer"} | {"type":"cancel"} | {"type":"unclear"}';
+
+async function evaluateAnswer(question: string, answer: string): Promise<'answer' | 'cancel' | 'unclear'> {
+  try {
+    const raw = await chat([
+      { role: 'system', content: ANSWER_EVAL_PROMPT },
+      { role: 'user',   content: `Pergunta do fluxo: "${question}"\nResposta do usuário: "${answer}"` },
+    ]);
+    const json = raw.match(/\{[\s\S]*?\}/)?.[0];
+    if (!json) return 'answer';
+    const { type } = JSON.parse(json) as { type?: string };
+    if (type === 'cancel')  return 'cancel';
+    if (type === 'unclear') return 'unclear';
+    return 'answer';
+  } catch {
+    return 'answer'; // safe fallback — never block a valid answer on LLM error
+  }
+}
 
 async function executeStep(instance: WorkflowInstance): Promise<StepResult> {
   const steps = await getWorkflowSteps(instance.workflow_id);
@@ -140,6 +174,22 @@ export async function answerQuestion(instanceId: string, answer: string): Promis
 
   if (!step?.variable_name) {
     return { action: 'error', message: 'Passo atual não é uma pergunta com variável definida.' };
+  }
+
+  // Evaluate whether the message is a valid answer, an explicit cancellation,
+  // or something unclear. The LLM decides, so "Não" as answer to a yes/no
+  // question is accepted — it only cancels if the user explicitly asks to exit.
+  const interpretation = await evaluateAnswer(step.content, answer);
+  if (interpretation === 'cancel') {
+    await cancelInstance(instanceId);
+    return { action: 'workflow_cancelled' };
+  }
+  if (interpretation === 'unclear') {
+    return {
+      action: 'workflow_unclear',
+      prompt: `Não consegui interpretar sua resposta.\n\n*Pergunta:* ${step.content}\n\nPor favor responda à pergunta, ou diga "cancelar fluxo" para sair.`,
+      instanceId,
+    };
   }
 
   const updatedVars = { ...(instance.variables as Record<string, string>), [step.variable_name]: answer };

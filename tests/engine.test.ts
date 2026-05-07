@@ -17,6 +17,10 @@ jest.mock('../src/ai/classifier', () => ({
   classify: jest.fn(),
 }));
 
+jest.mock('../src/ai/glm', () => ({
+  chat: jest.fn(),
+}));
+
 jest.mock('../src/format', () => ({
   formatDemand: jest.fn(() => '🟡 Admissão de Frank — administrativo'),
 }));
@@ -30,19 +34,21 @@ import {
 } from '../src/db/workflows';
 import { interpolate } from '../src/workflows/interpolate';
 import { classify } from '../src/ai/classifier';
+import { chat } from '../src/ai/glm';
 import { formatDemand } from '../src/format';
 
-const mockGetSteps       = jest.mocked(getWorkflowSteps);
+const mockGetSteps        = jest.mocked(getWorkflowSteps);
 const mockGetTemplateById = jest.mocked(getTemplateById);
-const mockGetInstance    = jest.mocked(getInstanceById);
-const mockGetActive      = jest.mocked(getActiveInstance);
-const mockCreate        = jest.mocked(createInstance);
-const mockAdvance       = jest.mocked(advanceInstance);
-const mockComplete      = jest.mocked(completeInstance);
-const mockCancel        = jest.mocked(cancelInstance);
-const mockInterpolate   = jest.mocked(interpolate);
-const mockClassify      = jest.mocked(classify);
-const mockFormatDemand  = jest.mocked(formatDemand);
+const mockGetInstance     = jest.mocked(getInstanceById);
+const mockGetActive       = jest.mocked(getActiveInstance);
+const mockCreate          = jest.mocked(createInstance);
+const mockAdvance         = jest.mocked(advanceInstance);
+const mockComplete        = jest.mocked(completeInstance);
+const mockCancel          = jest.mocked(cancelInstance);
+const mockInterpolate     = jest.mocked(interpolate);
+const mockClassify        = jest.mocked(classify);
+const mockFormatDemand    = jest.mocked(formatDemand);
+const mockChat            = jest.mocked(chat);
 
 const INSTANCE = {
   id: 'inst-1',
@@ -84,6 +90,8 @@ beforeEach(() => {
   mockInterpolate.mockImplementation((t: string) => t);
   mockClassify.mockResolvedValue(CLASSIFY_RESULT);
   mockFormatDemand.mockReturnValue('🟡 Admissão de Frank — administrativo');
+  // Default: treat all answers as valid (most tests don't care about evaluation)
+  mockChat.mockResolvedValue(JSON.stringify({ type: 'answer' }));
 });
 
 // ── triggerWorkflow ────────────────────────────────────────────────────────────
@@ -306,6 +314,63 @@ describe('answerQuestion()', () => {
     const result = await answerQuestion('missing', 'resposta');
 
     expect(result.action).toBe('error');
+  });
+
+  // ── evaluateAnswer integration ─────────────────────────────────────────────
+
+  test('cancels workflow when LLM classifies answer as cancel', async () => {
+    mockGetInstance.mockResolvedValue({ ...INSTANCE, current_step_order: 1 });
+    mockGetSteps.mockResolvedValue([{ ...STEP_ASK, step_order: 1 }]);
+    mockChat.mockResolvedValue(JSON.stringify({ type: 'cancel' }));
+    mockCancel.mockResolvedValue(undefined);
+
+    const result = await answerQuestion('inst-1', 'cancelar fluxo');
+
+    expect(mockCancel).toHaveBeenCalledWith('inst-1');
+    expect(result.action).toBe('workflow_cancelled');
+  });
+
+  test('returns workflow_unclear when LLM says answer does not match question', async () => {
+    mockGetInstance.mockResolvedValue({ ...INSTANCE, current_step_order: 1 });
+    mockGetSteps.mockResolvedValue([{ ...STEP_ASK, step_order: 1 }]);
+    mockChat.mockResolvedValue(JSON.stringify({ type: 'unclear' }));
+
+    const result = await answerQuestion('inst-1', 'alguma coisa aleatória');
+
+    expect(result.action).toBe('workflow_unclear');
+    if (result.action === 'workflow_unclear') {
+      expect(result.instanceId).toBe('inst-1');
+      expect(result.prompt).toMatch(/responda à pergunta/i);
+    }
+  });
+
+  test('proceeds normally when LLM classifies answer as valid', async () => {
+    mockGetInstance.mockResolvedValue({ ...INSTANCE, current_step_order: 1 });
+    mockGetSteps.mockResolvedValue([{ ...STEP_ASK, step_order: 1 }]);
+    mockAdvance.mockResolvedValue(undefined);
+    mockComplete.mockResolvedValue(undefined);
+    mockChat.mockResolvedValue(JSON.stringify({ type: 'answer' }));
+
+    const result = await answerQuestion('inst-1', 'Não contratado');
+
+    expect(mockAdvance).toHaveBeenCalled();
+    expect(result.action).not.toBe('workflow_cancelled');
+    expect(result.action).not.toBe('workflow_unclear');
+  });
+
+  test('falls back to answer when LLM fails', async () => {
+    mockGetInstance.mockResolvedValue({ ...INSTANCE, current_step_order: 1 });
+    mockGetSteps.mockResolvedValue([{ ...STEP_ASK, step_order: 1 }]);
+    mockChat.mockRejectedValue(new Error('LLM unavailable'));
+    mockAdvance.mockResolvedValue(undefined);
+    mockComplete.mockResolvedValue(undefined);
+
+    const result = await answerQuestion('inst-1', 'Técnico de Enfermagem');
+
+    // Should not cancel or show unclear — should proceed as normal answer
+    expect(result.action).not.toBe('workflow_cancelled');
+    expect(result.action).not.toBe('workflow_unclear');
+    expect(mockAdvance).toHaveBeenCalled();
   });
 });
 

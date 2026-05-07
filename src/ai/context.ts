@@ -53,11 +53,8 @@ export function clearPendingAction(sender: string): void {
 
 // ── Confirmation detection ───────────────────────────────────────────────────
 
-const CONFIRMATIONS          = /^(sim|pode|confirma|ok|salva|salvar|isso|correto|certo|é isso|pode salvar|pode registrar|s)\b/i;
-const REJECTIONS             = /^(não|nao|cancela|cancelar|para|errado|não é isso|desiste|n)\b/i;
-// Stricter variant used when the user is answering a workflow question.
-// "Não contratado" is an answer; "Não" alone is a cancellation.
-const WORKFLOW_CANCELLATIONS = /^(não|nao|cancela|cancelar|para|desiste|n)\s*[.!?]*$/i;
+const CONFIRMATIONS = /^(sim|pode|confirma|ok|salva|salvar|isso|correto|certo|é isso|pode salvar|pode registrar|s)\b/i;
+const REJECTIONS    = /^(não|nao|cancela|cancelar|para|errado|não é isso|desiste|n)\b/i;
 
 export function isConfirmation(message: string): boolean {
   return CONFIRMATIONS.test(message.trim());
@@ -65,13 +62,6 @@ export function isConfirmation(message: string): boolean {
 
 export function isRejection(message: string): boolean {
   return REJECTIONS.test(message.trim());
-}
-
-/** Returns true only when the message is exclusively a cancellation word.
- *  Use this inside an active workflow so that answers like "Não contratado"
- *  are forwarded to the engine rather than cancelling the flow. */
-export function isWorkflowCancellation(message: string): boolean {
-  return WORKFLOW_CANCELLATIONS.test(message.trim());
 }
 
 // ── Active workflow map ──────────────────────────────────────────────────────
