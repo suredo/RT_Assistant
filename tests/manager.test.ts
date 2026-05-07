@@ -494,6 +494,37 @@ describe('modifyManageCommand()', () => {
       expect(result.response).toContain('⚠️');
     }
   });
+
+  test('applies a small removal and returns complete updated steps without removed field', async () => {
+    const existingWithTwoSteps = {
+      operation: 'create' as const,
+      name: 'Contratação',
+      description: 'Quando há necessidade de contratar',
+      steps: [
+        { step_order: 1, step_type: 'ask_question', content: 'Qual o cargo, departamento e justificativa?', variable_name: 'info' },
+        { step_order: 2, step_type: 'send_message', content: 'Contratação — rascunho', template_content: 'Rascunho: {{info}}' },
+      ],
+    };
+
+    mockChat.mockResolvedValue(JSON.stringify({
+      operation: 'create',
+      name: 'Contratação',
+      description: 'Quando há necessidade de contratar',
+      steps: [
+        { step_order: 1, step_type: 'ask_question', content: 'Qual o cargo e departamento?', variable_name: 'info' },
+        { step_order: 2, step_type: 'send_message', content: 'Contratação — rascunho', template_content: 'Rascunho: {{info}}' },
+      ],
+    }));
+
+    const result = await modifyManageCommand('retire a justificativa', existingWithTwoSteps);
+
+    expect(result.type).toBe('preview');
+    if (result.type === 'preview') {
+      expect(result.cmd.steps).toHaveLength(2);
+      expect(result.cmd.steps![0].content).not.toContain('justificativa');
+      expect(result.cmd.steps![0].content).toContain('cargo');
+    }
+  });
 });
 
 describe('handleManageWorkflows() — template resolution', () => {
