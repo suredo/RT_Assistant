@@ -514,3 +514,25 @@ describe('triggerWorkflow() — send_message template resolution', () => {
     }
   });
 });
+
+// ── systemVariables — auto-fill date placeholders ─────────────────────────────
+
+describe('systemVariables — auto-fill placeholders', () => {
+  test('passes data_atual, hora_atual, data_hora_atual, and data alias to interpolate on every step', async () => {
+    jest.clearAllMocks();
+    mockCreate.mockResolvedValue({ ...INSTANCE, variables: {} });
+    mockGetSteps.mockResolvedValue([STEP_SEND]);
+    mockInterpolate.mockReturnValue('resolved content');
+
+    await triggerWorkflow('wf-1', '5511999', {});
+
+    // interpolate is called with (content, vars) — check the vars argument
+    expect(mockInterpolate).toHaveBeenCalled();
+    const vars = mockInterpolate.mock.calls[0][1] as Record<string, string>;
+    expect(vars).toHaveProperty('data_atual');
+    expect(vars).toHaveProperty('hora_atual');
+    expect(vars).toHaveProperty('data_hora_atual');
+    expect(vars).toHaveProperty('data');             // alias for robustness
+    expect(vars.data).toBe(vars.data_atual);          // alias equals canonical key
+  });
+});

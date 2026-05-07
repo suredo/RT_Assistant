@@ -65,6 +65,7 @@ REGRAS IMPORTANTES PARA STEPS:
 - Para "send_message": use SEMPRE dois campos separados — "content" com o nome curto do template (ex: "Contratação — divulgação RH") e "template_content" com o texto completo da mensagem. Nunca coloque o texto completo em "content".
 - NÃO use múltiplos ask_question para preencher um template. Use ask_question somente para informações realmente necessárias não mencionadas na mensagem, e depois um send_message com o template completo em "template_content".
 - Use "ask_question" com moderação — apenas quando a informação é realmente necessária e não foi fornecida na mensagem original.
+- VARIÁVEIS AUTOMÁTICAS — disponíveis em todo step sem precisar de ask_question: {{data_atual}} = data de hoje (ex: 06/05/2026), {{hora_atual}} = horário atual (ex: 14:30), {{data_hora_atual}} = data e hora juntos. Use sempre {{data_atual}} para a data, NUNCA invente variáveis como {{data}} ou {{data_solicitacao}}.
 - IMPORTANTE: o bot não envia mensagens para terceiros. Quando o destino final é outra pessoa (RH, médico, fornecedor, direção), o send_message entrega um rascunho para a RT revisar e encaminhar manualmente. Sempre inicie o "template_content" com "📋 Rascunho para encaminhar ao [destino] — revise antes de enviar:".
 
 Use "list" para listar/ver os workflows cadastrados.
@@ -92,6 +93,7 @@ REGRAS:
 - Renumere step_order sequencialmente após qualquer inserção ou remoção.
 - Mantenha todos os passos não afetados exatamente como estão.
 - Para "send_message": use "content" para o nome curto do template e "template_content" para o texto completo.
+- Variáveis automáticas disponíveis em todo step sem ask_question: {{data_atual}}, {{hora_atual}}, {{data_hora_atual}}. Use sempre {{data_atual}} para datas — NÃO use {{data}}, {{data_solicitacao}} ou similares.
 - Retorne APENAS o JSON, sem texto adicional.`;
 
 // ── Modification parser ────────────────────────────────────────────────────────

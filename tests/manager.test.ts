@@ -636,6 +636,11 @@ describe('MANAGER_PROMPT — structural contract', () => {
   test('instructs draft prefix for third-party destinations', () => {
     expect(promptContent).toContain('Rascunho para encaminhar');
   });
+
+  test('instructs to use {{data_atual}} for current date, not {{data}}', () => {
+    expect(promptContent).toContain('data_atual');
+    expect(promptContent).toMatch(/VARIÁVEIS AUTOMÁTICAS|automáticas/i);
+  });
 });
 
 describe('MODIFY_PROMPT — structural contract', () => {
@@ -680,5 +685,9 @@ describe('MODIFY_PROMPT — structural contract', () => {
 
   test('instructs operation must match the original', () => {
     expect(promptContent).toMatch(/mesmo.*opera|opera.*original/i);
+  });
+
+  test('instructs to use {{data_atual}} for current date', () => {
+    expect(promptContent).toContain('data_atual');
   });
 });

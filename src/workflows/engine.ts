@@ -26,6 +26,7 @@ function systemVariables(): Record<string, string> {
     data_atual:      date,
     hora_atual:      time,
     data_hora_atual: `${date} ${time}`,
+    data:            date,   // alias — LLMs often generate {{data}} instead of {{data_atual}}
   };
 }
 import { classify } from '../ai/classifier';
