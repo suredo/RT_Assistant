@@ -82,6 +82,20 @@ export function clearActiveWorkflow(sender: string): void {
   activeWorkflowMap.delete(sender);
 }
 
+// ── Greeted senders ──────────────────────────────────────────────────────────
+// Tracks which senders have already received the onboarding welcome this session.
+// Resets on bot restart — intentional, so returning users get a reminder occasionally.
+
+const greetedSenders = new Set<string>();
+
+export function hasBeenGreeted(sender: string): boolean {
+  return greetedSenders.has(sender);
+}
+
+export function markGreeted(sender: string): void {
+  greetedSenders.add(sender);
+}
+
 // ── Test helper ──────────────────────────────────────────────────────────────
 
 export function clearHistory(sender: string): void {
@@ -92,4 +106,5 @@ export function _reset(): void {
   buffers.clear();
   pendingActions.clear();
   activeWorkflowMap.clear();
+  greetedSenders.clear();
 }

@@ -7,7 +7,7 @@ export interface QueryFilters {
 }
 
 export interface Classification {
-  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'suggest_workflow' | 'discuss' | 'other';
+  type: 'new_demand' | 'update' | 'query' | 'add_note' | 'trigger_workflow' | 'manage_workflows' | 'suggest_workflow' | 'discuss' | 'other' | 'help' | 'create_notification';
   category: 'urgência clínica' | 'gestão de equipe' | 'equipe médica' | 'administrativo' | 'regulatório' | 'rotina';
   priority: 'high' | 'medium' | 'low';
   summary: string;
@@ -17,6 +17,8 @@ export interface Classification {
   note: string | null;
   workflowId: string | null;
   workflowVariables: Record<string, string> | null;
+  notificationContent: string | null;
+  notificationScheduledAt: string | null;
 }
 
 const FALLBACK: Classification = {
@@ -29,12 +31,14 @@ const FALLBACK: Classification = {
   queryFilters: null,
   note: null,
   workflowId: null,
-  workflowVariables: null
+  workflowVariables: null,
+  notificationContent: null,
+  notificationScheduledAt: null,
 };
 
 const BASE_CLASSIFY_PROMPT = `Você é um classificador de demandas de uma clínica de hemodiálise.
 Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
-- type: "new_demand" | "update" | "query" | "add_note" | "trigger_workflow" | "manage_workflows" | "suggest_workflow" | "discuss" | "other"
+- type: "new_demand" | "update" | "query" | "add_note" | "trigger_workflow" | "manage_workflows" | "suggest_workflow" | "discuss" | "other" | "help" | "create_notification"
 - category: "urgência clínica" | "gestão de equipe" | "equipe médica" | "administrativo" | "regulatório" | "rotina"
 - priority: "high" | "medium" | "low"
 - summary: resumo curto da demanda em português (máximo 80 caracteres)
@@ -48,6 +52,8 @@ Analise a mensagem e retorne SOMENTE um JSON válido com os campos:
 - note: quando type é "add_note", o texto da nota a ser registrada (extraído literalmente da mensagem após os dois-pontos ou equivalente); null para outros tipos.
 - workflowId: quando type é "trigger_workflow", o id do workflow correspondente; null para outros tipos.
 - workflowVariables: quando type é "trigger_workflow", um objeto com as variáveis extraídas da mensagem; as chaves devem ser os nomes de variável listados em cada workflow (ex: se o workflow lista variáveis "nome_colaborador", use {"nome_colaborador": "Frank"}); null para outros tipos.
+- notificationContent: quando type é "create_notification", o texto da notificação ou lembrete extraído da mensagem; null para outros tipos.
+- notificationScheduledAt: quando type é "create_notification", a data/hora no formato ISO 8601 (ex: "2026-05-08T09:00:00") inferida da mensagem; null se não houver horário especificado.
 
 Use type "add_note" quando a mensagem pede para registrar uma observação, andamento ou nota em uma demanda existente.
 
@@ -60,6 +66,10 @@ Use type "manage_workflows" quando a mensagem menciona a palavra "workflow" junt
 Use type "suggest_workflow" quando a mensagem descreve um processo recorrente ou procedimento estruturado que tipicamente envolve múltiplas etapas coordenadas (exemplos: abertura de vaga, contratação/admissão de funcionário, desligamento/offboarding, integração de novo colaborador, treinamento obrigatório, renovação de contrato, auditoria periódica) E nenhum workflow ativo corresponde a esse gatilho. NÃO use "suggest_workflow" para demandas urgentes ou únicas (problema com paciente, equipamento com defeito, compra pontual, dúvida). Ao retornar "suggest_workflow", preencha category, priority e summary normalmente como faria para new_demand.
 
 Use type "discuss" quando a mensagem indica que a RT quer pensar, planejar, discutir ou pedir opinião sem registrar nada — exemplos: "o que você acha de...", "estou pensando em...", "me ajuda a pensar sobre...", "qual seria a melhor forma de...". NÃO use "discuss" se houver uma ação clara a tomar.
+
+Use type "help" quando o usuário pergunta o que o assistente pode fazer — exemplos: "ajuda", "o que você faz?", "como uso isso?", "quais são suas funções?". Use "discuss" quando pedem ajuda para executar uma tarefa específica ("me ajude a elaborar...", "me ajuda a pensar...").
+
+Use type "create_notification" quando o usuário quer criar um lembrete ou notificação para si mesmo — exemplos: "me lembre amanhã às 9h de verificar os equipamentos", "cria uma notificação toda segunda às 8h sobre a escala". Preencha notificationContent com o texto do lembrete e notificationScheduledAt com o horário em ISO 8601 inferido da mensagem (null se não especificado).
 
 Exemplos de mensagens que indicam resolução: "foi resolvida", "já foi feito", "pode fechar", "concluído".
 Retorne APENAS o JSON, sem explicações ou texto adicional.`;
@@ -138,7 +148,9 @@ export async function classify(
       workflowId: type === 'trigger_workflow' && typeof parsed.workflowId === 'string' ? parsed.workflowId : null,
       workflowVariables: type === 'trigger_workflow' && parsed.workflowVariables && typeof parsed.workflowVariables === 'object'
         ? parsed.workflowVariables as Record<string, string>
-        : null
+        : null,
+      notificationContent: type === 'create_notification' && typeof parsed.notificationContent === 'string' ? parsed.notificationContent : null,
+      notificationScheduledAt: type === 'create_notification' && typeof parsed.notificationScheduledAt === 'string' ? parsed.notificationScheduledAt : null,
     };
   } catch {
     return FALLBACK;

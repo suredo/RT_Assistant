@@ -14,8 +14,10 @@ import {
   getPendingAction, setPendingAction, clearPendingAction,
   isConfirmation, isRejection,
   setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
+  hasBeenGreeted, markGreeted,
   PendingAction
 } from '../ai/context';
+import { formatHelp, formatWelcome } from '../help';
 import { saveDemand, updateDemand, resolveDemand, appendNote, getOpenDemands, getDemands, Demand } from '../db/supabase';
 import { getActiveWorkflows, getWorkflowSteps, createNotification } from '../db/workflows';
 import { triggerWorkflow, advanceAfterConfirmation, answerQuestion, cancelWorkflow, getResumableInstance, StepResult } from '../workflows/engine';
@@ -166,6 +168,13 @@ export async function handleMessage(
   role: 'rt' | 'team',
   sendFn: (content: string) => Promise<void>,
 ): Promise<void> {
+  // ── Onboarding welcome (first message per session) ───────────────────────
+  if (!hasBeenGreeted(senderNumber)) {
+    markGreeted(senderNumber);
+    await sendFn(formatWelcome(role));
+    // continue — still process the original message normally
+  }
+
   // ── Check for active workflow (ask_question in progress) ─────────────────
   let activeInstanceId = getActiveWorkflow(senderNumber);
   if (!activeInstanceId) {
@@ -329,6 +338,32 @@ export async function handleMessage(
       console.error('⚠️ Erro ao gerenciar workflow:', err);
       await sendFn('⚠️ Erro ao processar o pedido. Tente novamente.');
     }
+    return;
+  }
+
+  // ── Help ──────────────────────────────────────────────────────────────────
+  if (classification.type === 'help') {
+    await sendFn(formatHelp(role));
+    return;
+  }
+
+  // ── Standalone notification / reminder ────────────────────────────────────
+  if (classification.type === 'create_notification') {
+    const content = classification.notificationContent ?? body;
+    const summary = content.length > 80 ? content.slice(0, 77) + '...' : content;
+    const action: PendingAction = {
+      type: 'create_notification',
+      instanceId: null,
+      recipient: senderNumber,
+      content,
+      scheduledAt: classification.notificationScheduledAt ?? undefined,
+      notificationSummary: summary,
+    };
+    setPendingAction(senderNumber, action);
+    const when = classification.notificationScheduledAt
+      ? `agendada para ${new Date(classification.notificationScheduledAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`
+      : 'sem horário definido';
+    await sendFn(`🔔 Vou criar esta notificação:\n${content}\n_(${when})_\n\nConfirma? (sim/não)`);
     return;
   }
 

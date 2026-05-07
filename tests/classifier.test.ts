@@ -368,6 +368,7 @@ describe('BASE_CLASSIFY_PROMPT — structural contract', () => {
   const ALL_INTENTS = [
     'new_demand', 'update', 'query', 'add_note',
     'trigger_workflow', 'manage_workflows', 'suggest_workflow', 'discuss', 'other',
+    'help', 'create_notification',
   ];
   const ALL_CATEGORIES = [
     'urgência clínica', 'gestão de equipe', 'equipe médica',

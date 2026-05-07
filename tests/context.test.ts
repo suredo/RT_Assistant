@@ -3,6 +3,7 @@ import {
   setPendingAction, getPendingAction, clearPendingAction,
   isConfirmation, isRejection,
   setActiveWorkflow, getActiveWorkflow, clearActiveWorkflow,
+  hasBeenGreeted, markGreeted,
   _reset
 } from '../src/ai/context';
 
@@ -195,6 +196,31 @@ describe('isRejection()', () => {
 
   test('returns false for an unrelated message', () => {
     expect(isRejection('paciente na cadeira 3')).toBe(false);
+  });
+});
+
+describe('greeted senders', () => {
+  beforeEach(() => _reset());
+
+  test('returns false for unknown sender', () => {
+    expect(hasBeenGreeted('new-sender')).toBe(false);
+  });
+
+  test('returns true after markGreeted', () => {
+    markGreeted('s1');
+    expect(hasBeenGreeted('s1')).toBe(true);
+  });
+
+  test('_reset clears greeted state', () => {
+    markGreeted('s2');
+    _reset();
+    expect(hasBeenGreeted('s2')).toBe(false);
+  });
+
+  test('different senders are independent', () => {
+    markGreeted('alice');
+    expect(hasBeenGreeted('alice')).toBe(true);
+    expect(hasBeenGreeted('bob')).toBe(false);
   });
 });
 

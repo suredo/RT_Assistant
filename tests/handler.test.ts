@@ -30,6 +30,13 @@ jest.mock('../src/ai/context', () => ({
   setActiveWorkflow:   jest.fn(),
   getActiveWorkflow:   jest.fn(),
   clearActiveWorkflow: jest.fn(),
+  hasBeenGreeted:      jest.fn(),
+  markGreeted:         jest.fn(),
+}));
+
+jest.mock('../src/help', () => ({
+  formatHelp:    jest.fn().mockReturnValue('[help content]'),
+  formatWelcome: jest.fn().mockReturnValue('[welcome]'),
 }));
 
 jest.mock('../src/db/supabase', () => ({
@@ -76,7 +83,9 @@ import {
   getPendingAction, setPendingAction, clearPendingAction,
   isConfirmation, isRejection,
   getHistory,
+  hasBeenGreeted, markGreeted,
 } from '../src/ai/context';
+import { formatHelp, formatWelcome } from '../src/help';
 import { getOpenDemands, getDemands } from '../src/db/supabase';
 import { getActiveWorkflows, getWorkflowSteps } from '../src/db/workflows';
 import {
@@ -113,6 +122,11 @@ const mockAdvanceAfter         = jest.mocked(advanceAfterConfirmation);
 const mockHandleManage         = jest.mocked(handleManageWorkflows);
 const mockExecuteManage        = jest.mocked(executeManageCommand);
 const mockModifyManage         = jest.mocked(modifyManageCommand);
+const mockHasBeenGreeted       = jest.mocked(hasBeenGreeted);
+const mockMarkGreeted          = jest.mocked(markGreeted);
+// formatHelp / formatWelcome are static mocks; just reference for assertions
+jest.mocked(formatHelp);
+jest.mocked(formatWelcome);
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -121,16 +135,18 @@ const BODY     = 'test message';
 const INSTANCE = 'instance-uuid-1';
 
 const DEFAULT_CLASSIFICATION = {
-  type:             'other'   as const,
-  category:         'rotina'  as const,
-  priority:         'low'     as const,
-  summary:          'test',
-  demandIndex:      null,
-  resolved:         false,
-  queryFilters:     null,
-  note:             null,
-  workflowId:       null,
-  workflowVariables: null,
+  type:                    'other'   as const,
+  category:                'rotina'  as const,
+  priority:                'low'     as const,
+  summary:                 'test',
+  demandIndex:             null,
+  resolved:                false,
+  queryFilters:            null,
+  note:                    null,
+  workflowId:              null,
+  workflowVariables:       null,
+  notificationContent:     null,
+  notificationScheduledAt: null,
 };
 
 const STEP_COMPLETE = { action: 'workflow_complete' as const, summary: 'Workflow concluído' };
@@ -158,6 +174,9 @@ beforeEach(() => {
 
   captured = [];
   sendFn   = jest.fn(async (msg: string) => { captured.push(msg); });
+
+  // Default: already greeted — keeps existing tests unaffected by onboarding
+  mockHasBeenGreeted.mockReturnValue(true);
 
   // Default: idle state — no active workflow, no pending action
   mockGetActiveWorkflow.mockReturnValue(null);
@@ -560,5 +579,118 @@ describe('role=team', () => {
     await handleMessage(BODY, SENDER, 'team', sendFn);
 
     expect(mockGetOpenDemands).not.toHaveBeenCalled();
+  });
+});
+
+// ── Help intent ───────────────────────────────────────────────────────────────
+
+describe('help intent', () => {
+  test('sends formatted help content and returns', async () => {
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'help' as never });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(captured[0]).toBe('[help content]');
+    expect(mockReply).not.toHaveBeenCalled();
+  });
+
+  test('passes role to formatHelp', async () => {
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'help' as never });
+
+    await handleMessage(BODY, SENDER, 'team', sendFn);
+
+    const { formatHelp: fh } = jest.requireMock('../src/help');
+    expect(fh).toHaveBeenCalledWith('team');
+  });
+});
+
+// ── Standalone notification intent ────────────────────────────────────────────
+
+describe('create_notification intent', () => {
+  test('stages create_notification PendingAction and sends confirmation', async () => {
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'Verificar equipamentos',
+      notificationScheduledAt: null,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockSetPendingAction).toHaveBeenCalledWith(
+      SENDER,
+      expect.objectContaining({ type: 'create_notification', instanceId: null, recipient: SENDER }),
+    );
+    expect(captured[0]).toContain('(sim/não)');
+    expect(captured[0]).toContain('Verificar equipamentos');
+  });
+
+  test('falls back to body when notificationContent is null', async () => {
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: null,
+      notificationScheduledAt: null,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockSetPendingAction).toHaveBeenCalledWith(
+      SENDER,
+      expect.objectContaining({ content: BODY }),
+    );
+  });
+
+  test('includes scheduledAt in PendingAction when provided', async () => {
+    const isoTime = '2026-05-08T09:00:00';
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'Reunião de equipe',
+      notificationScheduledAt: isoTime,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockSetPendingAction).toHaveBeenCalledWith(
+      SENDER,
+      expect.objectContaining({ scheduledAt: isoTime }),
+    );
+  });
+});
+
+// ── Onboarding welcome ────────────────────────────────────────────────────────
+
+describe('onboarding welcome', () => {
+  test('sends welcome on first message then continues processing', async () => {
+    mockHasBeenGreeted.mockReturnValue(false);
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'other' });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockMarkGreeted).toHaveBeenCalledWith(SENDER);
+    expect(captured[0]).toBe('[welcome]');
+    // normal reply also happens
+    expect(captured.length).toBeGreaterThan(1);
+  });
+
+  test('does not send welcome when sender already greeted', async () => {
+    mockHasBeenGreeted.mockReturnValue(true);
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'other' });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockMarkGreeted).not.toHaveBeenCalled();
+    expect(captured[0]).not.toBe('[welcome]');
+  });
+
+  test('passes role to formatWelcome', async () => {
+    mockHasBeenGreeted.mockReturnValue(false);
+    mockClassify.mockResolvedValue({ ...DEFAULT_CLASSIFICATION, type: 'other' });
+
+    await handleMessage(BODY, SENDER, 'team', sendFn);
+
+    const { formatWelcome: fw } = jest.requireMock('../src/help');
+    expect(fw).toHaveBeenCalledWith('team');
   });
 });

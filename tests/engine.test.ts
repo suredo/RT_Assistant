@@ -83,6 +83,8 @@ const CLASSIFY_RESULT = {
   note: null,
   workflowId: null,
   workflowVariables: null,
+  notificationContent: null,
+  notificationScheduledAt: null,
 };
 
 beforeEach(() => {

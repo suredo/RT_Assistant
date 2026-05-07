@@ -47,6 +47,7 @@ npm run test:watch  # watch mode during development
 | `src/workflows/engine.ts` | `tests/engine.test.ts` |
 | `src/workflows/manager.ts` | `tests/manager.test.ts` |
 | `src/workflows/notifications.ts` | `tests/notifications.test.ts` |
+| `src/help.ts` | `tests/help.test.ts` |
 
 ### What to test
 - All code paths in pure functions (happy path + error/edge cases)
