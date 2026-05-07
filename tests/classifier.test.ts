@@ -372,6 +372,78 @@ describe('classify() — discuss intent', () => {
   });
 });
 
+describe('classify() — help intent', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns type "help" when LLM classifies as help', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'help',
+      category: 'rotina', priority: 'low', summary: 'Ajuda',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+      notificationContent: null, notificationScheduledAt: null,
+    }));
+
+    const result = await classify('o que você faz?');
+
+    expect(result.type).toBe('help');
+    expect(result.notificationContent).toBeNull();
+    expect(result.notificationScheduledAt).toBeNull();
+  });
+});
+
+describe('classify() — create_notification intent', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('extracts notificationContent and notificationScheduledAt', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'create_notification',
+      category: 'rotina', priority: 'low', summary: 'Lembrete',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+      notificationContent: 'Verificar equipamentos',
+      notificationScheduledAt: '2026-05-08T09:00:00',
+    }));
+
+    const result = await classify('me lembre amanhã às 9h de verificar os equipamentos');
+
+    expect(result.type).toBe('create_notification');
+    expect(result.notificationContent).toBe('Verificar equipamentos');
+    expect(result.notificationScheduledAt).toBe('2026-05-08T09:00:00');
+  });
+
+  test('returns null for both fields when LLM omits them', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'create_notification',
+      category: 'rotina', priority: 'low', summary: 'Lembrete',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+    }));
+
+    const result = await classify('cria um lembrete');
+
+    expect(result.notificationContent).toBeNull();
+    expect(result.notificationScheduledAt).toBeNull();
+  });
+
+  test('does not extract notification fields for non-create_notification types', async () => {
+    mockChat.mockResolvedValue(JSON.stringify({
+      type: 'new_demand',
+      category: 'rotina', priority: 'low', summary: 'Demanda',
+      demandIndex: null, resolved: false, queryFilters: null, note: null,
+      workflowId: null, workflowVariables: null,
+      notificationContent: 'should be ignored',
+      notificationScheduledAt: '2026-01-01T00:00:00',
+    }));
+
+    const result = await classify('Falta de EPI');
+
+    expect(result.type).toBe('new_demand');
+    expect(result.notificationContent).toBeNull();
+    expect(result.notificationScheduledAt).toBeNull();
+  });
+});
+
 // ── Prompt structural contracts ────────────────────────────────────────────────
 // These tests capture the actual system prompt sent to the LLM and assert that
 // all key behavioral clauses are present. They catch accidental deletions and
@@ -438,6 +510,17 @@ describe('BASE_CLASSIFY_PROMPT — structural contract', () => {
   test('defines trigger_workflow with workflowId and workflowVariables fields', () => {
     expect(promptContent).toContain('workflowId');
     expect(promptContent).toContain('workflowVariables');
+  });
+
+  test('defines help intent — distinct from discuss', () => {
+    expect(promptContent).toContain('"help"');
+    expect(promptContent).toMatch(/help.*discuss|discuss.*help/is);
+  });
+
+  test('defines create_notification with notificationContent and notificationScheduledAt', () => {
+    expect(promptContent).toContain('"create_notification"');
+    expect(promptContent).toContain('notificationContent');
+    expect(promptContent).toContain('notificationScheduledAt');
   });
 });
 
