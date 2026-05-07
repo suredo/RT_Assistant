@@ -74,6 +74,59 @@ Use "edit" para substituir todos os passos de um workflow existente.
 Use "unknown" se o pedido não se encaixar em nenhuma operação acima.
 Retorne APENAS o JSON, sem texto adicional.`;
 
+const MODIFY_PROMPT = `Você é um assistente para gerenciar workflows de uma clínica de hemodiálise.
+Você receberá a definição atual de um workflow (nome, gatilho e lista de passos) seguida de um pedido de modificação.
+Aplique a modificação e retorne SOMENTE um JSON válido com os campos:
+- operation: deve ser o MESMO valor da operação original informada (repita exatamente: "create" ou "edit")
+- name: nome do workflow (mantenha o original se não for alterado)
+- description: gatilho do workflow (mantenha o original se não for alterado)
+- steps: LISTA COMPLETA dos passos após a modificação, cada passo com:
+  - step_order: inteiro começando em 1 (renumere após inserir/remover passos)
+  - step_type: ${STEP_TYPES}
+  - content: para "send_message": nome curto do template; para outros: texto completo com {{variavel}}
+  - template_content: (somente para "send_message") texto completo da mensagem com {{variáveis}}
+  - variable_name: nome da variável a capturar (somente para ask_question)
+
+REGRAS:
+- Retorne SEMPRE a lista completa de passos — nunca retorne apenas os passos afetados.
+- Renumere step_order sequencialmente após qualquer inserção ou remoção.
+- Mantenha todos os passos não afetados exatamente como estão.
+- Para "send_message": use "content" para o nome curto do template e "template_content" para o texto completo.
+- Retorne APENAS o JSON, sem texto adicional.`;
+
+// ── Modification parser ────────────────────────────────────────────────────────
+// Uses MODIFY_PROMPT so the LLM knows it's patching an existing workflow, not
+// parsing a fresh command. The full current definition is sent as context.
+
+async function parseModification(message: string, existingCmd: ManageCommand): Promise<ManageCommand> {
+  const stepsText = (existingCmd.steps ?? [])
+    .map(s => {
+      const base = `  ${s.step_order}. ${s.step_type}: ${s.content}${s.variable_name ? ` → {{${s.variable_name}}}` : ''}`;
+      return s.template_content ? `${base}\n     template_content: ${s.template_content}` : base;
+    })
+    .join('\n');
+
+  const userMessage =
+    `[Workflow atual]\n` +
+    `operation: "${existingCmd.operation}"\n` +
+    `Nome: "${existingCmd.name}"\n` +
+    `Gatilho: "${existingCmd.description ?? ''}"\n` +
+    `Passos:\n${stepsText}\n\n` +
+    `[Pedido de modificação]\n${message}`;
+
+  try {
+    const raw = await chat([
+      { role: 'system', content: MODIFY_PROMPT },
+      { role: 'user', content: userMessage },
+    ]);
+    const json = raw.match(/\{[\s\S]*\}/)?.[0];
+    if (!json) return FALLBACK_CMD;
+    return JSON.parse(json) as ManageCommand;
+  } catch {
+    return FALLBACK_CMD;
+  }
+}
+
 // ── Template resolver ─────────────────────────────────────────────────────────
 // Checks DB for each send_message step and sets template_exists.
 // Also normalises the step so content = template name and template_content = message text.
@@ -244,21 +297,7 @@ export async function modifyManageCommand(
   message: string,
   existingCmd: ManageCommand
 ): Promise<ManageResult> {
-  const stepsText = (existingCmd.steps ?? [])
-    .map(s => {
-      const base = `  ${s.step_order}. ${s.step_type}: ${s.content}${s.variable_name ? ` → {{${s.variable_name}}}` : ''}`;
-      // Include template_content in context so the LLM can read and modify it
-      return s.template_content ? `${base}\n     template_content: ${s.template_content}` : base;
-    })
-    .join('\n');
-  const contextMessage =
-    `[Workflow em revisão]\n` +
-    `Nome: "${existingCmd.name}"\n` +
-    `Gatilho: "${existingCmd.description ?? ''}"\n` +
-    `Passos:\n${stepsText}\n\n` +
-    `[Pedido de modificação]\n${message}`;
-
-  const cmd = await parseCommand(contextMessage);
+  const cmd = await parseModification(message, existingCmd);
   cmd.operation = existingCmd.operation; // preserve original — don't let LLM flip create↔edit
   if (cmd.steps?.length) cmd.steps = await resolveTemplates(cmd.steps, cmd.name);
 
