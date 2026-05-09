@@ -1,5 +1,6 @@
 jest.mock('../src/db/supabase', () => ({ getOpenDemands: jest.fn() }));
 jest.mock('../src/db/botState', () => ({ setLastActive: jest.fn(), getLastActive: jest.fn() }));
+jest.mock('../src/workflows/notifications', () => ({ resolveSendId: jest.fn((n: string) => `${n}@c.us`) }));
 import { formatBriefing } from '../src/briefing';
 
 describe('formatBriefing()', () => {

@@ -167,6 +167,7 @@ export async function handleMessage(
   senderNumber: string,
   role: 'rt' | 'team',
   sendFn: (content: string) => Promise<void>,
+  senderWhatsAppId?: string,
 ): Promise<void> {
   // ── Onboarding welcome (first message per session) ───────────────────────
   let sentWelcome = false;
@@ -380,7 +381,9 @@ export async function handleMessage(
     const action: PendingAction = {
       type: 'create_notification',
       instanceId: null,
-      recipient: senderNumber,
+      // Prefer the raw WhatsApp address (msg.from) — it already contains the
+      // @lid suffix that newer WhatsApp clients require for outbound messages.
+      recipient: senderWhatsAppId ?? senderNumber,
       content,
       scheduledAt,
       notificationSummary: summary,

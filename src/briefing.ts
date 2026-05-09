@@ -4,6 +4,7 @@ import { getOpenDemands } from './db/supabase';
 import { setLastActive } from './db/botState';
 import { formatDemand } from './format';
 import { getRtNumbers } from './whatsapp/auth';
+import { resolveSendId } from './workflows/notifications';
 
 export function formatBriefing(demands: Array<{ priority: string; summary: string }>): string {
   const high = demands.filter(d => d.priority === 'high');
@@ -43,7 +44,7 @@ export function startBriefingSchedule(client: Client): void {
       const text = formatBriefing(demands);
       const rtNumbers = getRtNumbers();
       await Promise.all(
-        rtNumbers.map(n => client.sendMessage(`${n}@c.us`, text))
+        rtNumbers.map(n => client.sendMessage(resolveSendId(n), text))
       );
       console.log(`☀️ Briefing enviado para ${rtNumbers.length} RT(s)`);
     } catch (err) {

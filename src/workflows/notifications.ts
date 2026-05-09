@@ -9,6 +9,9 @@ import { getRtNumbers, getRtLids, getTeamNumbers, getTeamLids } from '../whatsap
 // the recipient matches a configured number; fall back to @c.us otherwise.
 
 export function resolveSendId(recipient: string): string {
+  // Already a full WhatsApp ID (contains @lid or @c.us) — use directly.
+  if (recipient.includes('@')) return recipient;
+  // Phone number — prefer @lid when a matching LID is configured in env vars.
   if (getRtNumbers().some(n => recipient.includes(n))) {
     const lids = getRtLids();
     if (lids.length) return `${lids[0]}@lid`;

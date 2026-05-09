@@ -196,6 +196,11 @@ describe('resolveSendId()', () => {
     delete process.env.TEAM_LIDS;
   });
 
+  test('returns the input unchanged when it already contains @', () => {
+    expect(resolveSendId('5511999@lid')).toBe('5511999@lid');
+    expect(resolveSendId('5511999@c.us')).toBe('5511999@c.us');
+  });
+
   test('returns @c.us format when no LID is configured', () => {
     expect(resolveSendId('5511999')).toBe('5511999@c.us');
   });

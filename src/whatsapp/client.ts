@@ -87,7 +87,7 @@ async function createClient(): Promise<void> {
     };
 
     try {
-      await handleMessage(msg.body, senderNumber, role, sendFn);
+      await handleMessage(msg.body, senderNumber, role, sendFn, msg.from);
     } finally {
       clearInterval(typingInterval);
     }

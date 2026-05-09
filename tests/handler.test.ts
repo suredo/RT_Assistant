@@ -625,6 +625,23 @@ describe('create_notification intent', () => {
     expect(captured[0]).toContain('Verificar equipamentos');
   });
 
+  test('uses senderWhatsAppId as recipient when provided', async () => {
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'Verificar equipamentos',
+      notificationScheduledAt: null,
+    });
+    const whatsappId = `${SENDER}@lid`;
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn, whatsappId);
+
+    expect(mockSetPendingAction).toHaveBeenCalledWith(
+      SENDER,
+      expect.objectContaining({ recipient: whatsappId }),
+    );
+  });
+
   test('falls back to body when notificationContent is null', async () => {
     mockClassify.mockResolvedValue({
       ...DEFAULT_CLASSIFICATION,
