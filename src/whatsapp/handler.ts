@@ -318,7 +318,10 @@ export async function handleMessage(
   }
 
   // ── Classify ──────────────────────────────────────────────────────────────
-  const classification = await classify(body, activeWorkflows, new Date().toISOString());
+  // Pass Brasília local time — the LLM treats the number it sees as "current
+  // time", so UTC would shift all relative calculations by 3 hours.
+  const brasiliaIso = new Date().toLocaleString('sv', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T');
+  const classification = await classify(body, activeWorkflows, brasiliaIso);
 
   // ── Trigger workflow ──────────────────────────────────────────────────────
   if (classification.type === 'trigger_workflow' && classification.workflowId) {
@@ -352,9 +355,10 @@ export async function handleMessage(
   // ── Standalone notification / reminder ────────────────────────────────────
   if (classification.type === 'create_notification') {
     let content = classification.notificationContent ?? body;
-    // If the notification is asking for the demands list, resolve it now so
-    // the stored content is the actual list, not the raw request string.
-    if (/pendên|demanda|aberta|pendente/i.test(content)) {
+    // Only replace content when the notification is explicitly about listing
+    // existing demands (e.g. "me mande as pendências"). Do NOT replace for
+    // reminders that merely mention creating a demand ("criar uma demanda").
+    if (/pendên|demandas?\s+(?:em\s+aberto|abertas?|pendentes?)|todas?\s+as?\s+demandas/i.test(content)) {
       if (openDemands.length) {
         const list = openDemands.map((d, i) => formatDemand(d, { index: i + 1 })).join('\n');
         content = `📋 Pendências em aberto:\n${list}`;
@@ -363,17 +367,27 @@ export async function handleMessage(
       }
     }
     const summary = content.length > 80 ? content.slice(0, 77) + '...' : content;
+    // The LLM returns times relative to the Brasília local time we passed in.
+    // If the returned ISO string has no timezone suffix, treat it as Brasília
+    // (UTC-3, permanent since Brazil abolished DST in 2019) so it's stored and
+    // displayed correctly regardless of the server's system timezone.
+    const rawScheduled = classification.notificationScheduledAt;
+    const scheduledAt = rawScheduled
+      ? (rawScheduled.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(rawScheduled)
+          ? rawScheduled
+          : rawScheduled + '-03:00')
+      : undefined;
     const action: PendingAction = {
       type: 'create_notification',
       instanceId: null,
       recipient: senderNumber,
       content,
-      scheduledAt: classification.notificationScheduledAt ?? undefined,
+      scheduledAt,
       notificationSummary: summary,
     };
     setPendingAction(senderNumber, action);
-    const when = classification.notificationScheduledAt
-      ? `agendada para ${new Date(classification.notificationScheduledAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`
+    const when = scheduledAt
+      ? `agendada para ${new Date(scheduledAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`
       : 'sem horário definido';
     await sendFn(`🔔 Vou criar esta notificação:\n${content}\n_(${when})_\n\nConfirma? (sim/não)`);
     return;

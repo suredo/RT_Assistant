@@ -641,24 +641,40 @@ describe('create_notification intent', () => {
     );
   });
 
-  test('includes scheduledAt in PendingAction when provided', async () => {
-    const isoTime = '2026-05-08T09:00:00';
+  test('appends Brasília offset to timezone-naive scheduledAt', async () => {
     mockClassify.mockResolvedValue({
       ...DEFAULT_CLASSIFICATION,
       type: 'create_notification' as never,
       notificationContent: 'Reunião de equipe',
-      notificationScheduledAt: isoTime,
+      notificationScheduledAt: '2026-05-08T09:00:00',
     });
 
     await handleMessage(BODY, SENDER, 'rt', sendFn);
 
     expect(mockSetPendingAction).toHaveBeenCalledWith(
       SENDER,
-      expect.objectContaining({ scheduledAt: isoTime }),
+      expect.objectContaining({ scheduledAt: '2026-05-08T09:00:00-03:00' }),
     );
   });
 
-  test('replaces demand-related content with the actual formatted demand list', async () => {
+  test('keeps scheduledAt unchanged when it already has a timezone suffix', async () => {
+    const isoWithZ = '2026-05-08T12:00:00Z';
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'Reunião de equipe',
+      notificationScheduledAt: isoWithZ,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    expect(mockSetPendingAction).toHaveBeenCalledWith(
+      SENDER,
+      expect.objectContaining({ scheduledAt: isoWithZ }),
+    );
+  });
+
+  test('replaces demand-listing content with the actual formatted demand list', async () => {
     mockGetOpenDemands.mockResolvedValue([OPEN_DEMAND]);
     mockClassify.mockResolvedValue({
       ...DEFAULT_CLASSIFICATION,
@@ -674,7 +690,7 @@ describe('create_notification intent', () => {
     expect(staged.content).toContain('[demand preview]');
   });
 
-  test('uses empty-demands message when demand-related notification has no open demands', async () => {
+  test('uses empty-demands message when demand-listing notification has no open demands', async () => {
     mockGetOpenDemands.mockResolvedValue([]);
     mockClassify.mockResolvedValue({
       ...DEFAULT_CLASSIFICATION,
@@ -687,6 +703,21 @@ describe('create_notification intent', () => {
 
     const staged = mockSetPendingAction.mock.calls[0][1] as { content: string };
     expect(staged.content).toContain('Nenhuma pendência em aberto');
+  });
+
+  test('does not replace content when reminder mentions creating a demand', async () => {
+    mockGetOpenDemands.mockResolvedValue([OPEN_DEMAND]);
+    mockClassify.mockResolvedValue({
+      ...DEFAULT_CLASSIFICATION,
+      type: 'create_notification' as never,
+      notificationContent: 'Criar demanda de checagem de máquina',
+      notificationScheduledAt: null,
+    });
+
+    await handleMessage(BODY, SENDER, 'rt', sendFn);
+
+    const staged = mockSetPendingAction.mock.calls[0][1] as { content: string };
+    expect(staged.content).toBe('Criar demanda de checagem de máquina');
   });
 });
 

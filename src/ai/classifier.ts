@@ -87,7 +87,7 @@ function buildClassifyPrompt(
   currentIso?: string
 ): string {
   const header = currentIso
-    ? `CONTEXTO TEMPORAL: Data e hora atuais = ${currentIso}. Use este valor como "hoje" e para calcular horários relativos ("em X minutos", "amanhã", "semana que vem"). NÃO use datas do seu treinamento.\n\n`
+    ? `CONTEXTO TEMPORAL: Data e hora atuais = ${currentIso} (horário de Brasília, UTC-3). Use este valor como "agora" e para calcular horários relativos ("em X minutos", "amanhã", "semana que vem"). NÃO use datas do seu treinamento. Retorne notificationScheduledAt no mesmo fuso horário (horário de Brasília), sem offset.\n\n`
     : '';
   const prompt = header + BASE_CLASSIFY_PROMPT;
   if (!activeWorkflows?.length) return prompt;
