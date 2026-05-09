@@ -12,6 +12,14 @@ export function getRtLids(): string[] {
   return parseList(process.env.RT_LID);
 }
 
+export function getTeamNumbers(): string[] {
+  return parseList(process.env.TEAM_NUMBERS);
+}
+
+export function getTeamLids(): string[] {
+  return parseList(process.env.TEAM_LIDS);
+}
+
 export function getRole(from: string): Role | null {
   if ([...getRtNumbers(), ...getRtLids()].some(n => from.includes(n))) return 'rt';
 

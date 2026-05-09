@@ -13,6 +13,7 @@ import {
   scheduleRecurringNotifications,
   getScheduledJobCount,
   _stopAllJobs,
+  resolveSendId,
 } from '../src/workflows/notifications';
 import { getPendingNotifications, markNotificationSent } from '../src/db/workflows';
 import cron from 'node-cron';
@@ -182,5 +183,47 @@ describe('_stopAllJobs()', () => {
 
     expect(mockStop).toHaveBeenCalled();
     expect(getScheduledJobCount()).toBe(0);
+  });
+});
+
+// ── resolveSendId ─────────────────────────────────────────────────────────────
+
+describe('resolveSendId()', () => {
+  afterEach(() => {
+    delete process.env.RT_NUMBER;
+    delete process.env.RT_LID;
+    delete process.env.TEAM_NUMBERS;
+    delete process.env.TEAM_LIDS;
+  });
+
+  test('returns @c.us format when no LID is configured', () => {
+    expect(resolveSendId('5511999')).toBe('5511999@c.us');
+  });
+
+  test('returns @lid format for RT when RT_LID is configured', () => {
+    process.env.RT_NUMBER = '5511999';
+    process.env.RT_LID = 'abc123lid';
+    expect(resolveSendId('5511999')).toBe('abc123lid@lid');
+  });
+
+  test('returns @lid format for a team member when TEAM_LIDS is configured', () => {
+    process.env.TEAM_NUMBERS = '5511888,5511777';
+    process.env.TEAM_LIDS = 'lid888,lid777';
+    expect(resolveSendId('5511777')).toBe('lid777@lid');
+  });
+
+  test('falls back to @c.us when RT_NUMBER matches but RT_LID is not set', () => {
+    process.env.RT_NUMBER = '5511999';
+    expect(resolveSendId('5511999')).toBe('5511999@c.us');
+  });
+
+  test('sendPendingNotifications uses LID when RT_LID is configured', async () => {
+    process.env.RT_NUMBER = '5511999';
+    process.env.RT_LID = 'rtlid123';
+    mockGetPending.mockResolvedValue([ONE_TIME]);
+
+    await sendPendingNotifications(mockClient);
+
+    expect(mockClient.sendMessage).toHaveBeenCalledWith('rtlid123@lid', 'Lembrete de reunião');
   });
 });
